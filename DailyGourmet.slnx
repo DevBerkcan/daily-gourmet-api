@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DailyGourmet.Api/DailyGourmet.Api.csproj" />
+    <Project Path="src/DailyGourmet.Application/DailyGourmet.Application.csproj" />
+    <Project Path="src/DailyGourmet.Domain/DailyGourmet.Domain.csproj" />
+    <Project Path="src/DailyGourmet.Infrastructure/DailyGourmet.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DailyGourmet.Api.IntegrationTests/DailyGourmet.Api.IntegrationTests.csproj" />
+    <Project Path="tests/DailyGourmet.Application.UnitTests/DailyGourmet.Application.UnitTests.csproj" />
+    <Project Path="tests/DailyGourmet.ArchitectureTests/DailyGourmet.ArchitectureTests.csproj" />
+    <Project Path="tests/DailyGourmet.Domain.UnitTests/DailyGourmet.Domain.UnitTests.csproj" />
+  </Folder>
+</Solution>
