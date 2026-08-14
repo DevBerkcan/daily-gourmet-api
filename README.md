@@ -2,11 +2,11 @@
 
 .NET 10 / ASP.NET Core Backend für die Daily-Gourmet-Catering-SaaS. Clean-Architecture-Solution mit vier Layern (`Domain → Application → Infrastructure → Api`), MS SQL Server (EF Core), Minimal APIs.
 
-> Ausführliche Architektur-, Datenbank- und Planungsdokumentation lebt bewusst im **Frontend-Repo** unter `docs/backend/` (`ARCHITECTURE_PLAN.md`, `DATABASE.md` mit dem vollständigen Mermaid-ER-Diagramm, `FRONTEND_CONTRACT_MATRIX.md`, `OPEN_QUESTIONS.md`, `adr/`) — sie ist eng mit den Frontend-Typen verzahnt (Contract-Matrix) und dort leichter aktuell zu halten. Dieses Repo enthält nur den Code plus die ADRs, die direkt Code-Entscheidungen dieses Repos betreffen.
+> Architektur-, Datenbank- und Planungsdokumentation liegt in [`docs/`](docs/) dieses Repos: [`ARCHITECTURE_PLAN.md`](docs/ARCHITECTURE_PLAN.md), [`DATABASE.md`](docs/DATABASE.md) (vollständiges Mermaid-ER-Diagramm), [`FRONTEND_CONTRACT_MATRIX.md`](docs/FRONTEND_CONTRACT_MATRIX.md), [`OPEN_QUESTIONS.md`](docs/OPEN_QUESTIONS.md), [`adr/`](docs/adr/), plus die ursprünglichen Planungsdokumente `backend-architektur.md`/`api-endpunkte.md`.
 
 ## Aktueller Stand: Phase 1 — Foundation
 
-Es existiert noch **keine Fachlichkeit** (keine Tenants, Users, Recipes, …) — nur die technische Grundlage: Solution-Struktur, leerer `AppDbContext` mit funktionierender Migrationspipeline, ProblemDetails-Fehlerbehandlung, Request-ID, OpenAPI, Health Checks, CORS, Rate-Limiting-Grundgerüst, Cookie-Auth-Registrierung (noch ohne Login-Logik), `ITenantContext`-Interface (Implementierung wirft bewusst `NotSupportedException` bis Phase 2). Siehe `docs/backend/ARCHITECTURE_PLAN.md` im Frontend-Repo für die vollständige Phasenplanung.
+Es existiert noch **keine Fachlichkeit** (keine Tenants, Users, Recipes, …) — nur die technische Grundlage: Solution-Struktur, leerer `AppDbContext` mit funktionierender Migrationspipeline, ProblemDetails-Fehlerbehandlung, Request-ID, OpenAPI, Health Checks, CORS, Rate-Limiting-Grundgerüst, Cookie-Auth-Registrierung (noch ohne Login-Logik), `ITenantContext`-Interface (Implementierung wirft bewusst `NotSupportedException` bis Phase 2). Siehe [`docs/ARCHITECTURE_PLAN.md`](docs/ARCHITECTURE_PLAN.md) für die vollständige Phasenplanung.
 
 ## Struktur
 
@@ -17,6 +17,7 @@ backend/
   Directory.Packages.props     # zentrale Paketverwaltung
   Dockerfile
   docker-compose.yml           # mssql + api für lokale Entwicklung
+  docs/                        # Architektur-/DB-/Planungsdokumentation, ADRs
   src/
     DailyGourmet.Domain/
     DailyGourmet.Application/
@@ -67,7 +68,7 @@ Migrationen werden **nicht** automatisch beim Container-Start ausgeführt (§56)
 
 ## Wichtige Architekturentscheidungen
 
-Siehe `docs/backend/adr/` im Frontend-Repo, insbesondere:
-- [0002 — MS SQL Server statt PostgreSQL](../docs/backend/adr/0002-mssql-over-postgresql.md) (MonsterASP-Hosting)
-- [0003 — camelCase JSON + ProblemDetails](../docs/backend/adr/0003-camelcase-json-and-problemdetails.md)
-- [0004 — Minimal APIs statt Controller](../docs/backend/adr/0004-minimal-apis.md)
+Siehe [`docs/adr/`](docs/adr/), insbesondere:
+- [0002 — MS SQL Server statt PostgreSQL](docs/adr/0002-mssql-over-postgresql.md) (MonsterASP-Hosting)
+- [0003 — camelCase JSON + ProblemDetails](docs/adr/0003-camelcase-json-and-problemdetails.md)
+- [0004 — Minimal APIs statt Controller](docs/adr/0004-minimal-apis.md)
