@@ -14,6 +14,13 @@ public sealed class LayerDependencyTests
     private const string InfrastructureNamespace = "DailyGourmet.Infrastructure";
     private const string ApiNamespace = "DailyGourmet.Api";
 
+    private static readonly string[] ForbiddenFrameworkNamespaces =
+    [
+        "Microsoft.EntityFrameworkCore",
+        "Microsoft.AspNetCore",
+        "System.Text.Json",
+    ];
+
     [Fact]
     public void Domain_should_not_depend_on_other_layers()
     {
@@ -42,6 +49,28 @@ public sealed class LayerDependencyTests
         var result = Types.InAssembly(typeof(TenantContext).Assembly)
             .Should()
             .NotHaveDependencyOn(ApiNamespace)
+            .GetResult();
+
+        Assert.True(result.IsSuccessful, FailureMessage(result));
+    }
+
+    [Fact]
+    public void Domain_should_not_depend_on_forbidden_frameworks()
+    {
+        var result = Types.InAssembly(typeof(DailyGourmet.Domain.AssemblyMarker).Assembly)
+            .Should()
+            .NotHaveDependencyOnAny(ForbiddenFrameworkNamespaces)
+            .GetResult();
+
+        Assert.True(result.IsSuccessful, FailureMessage(result));
+    }
+
+    [Fact]
+    public void Application_should_not_depend_on_forbidden_frameworks()
+    {
+        var result = Types.InAssembly(typeof(ITenantContext).Assembly)
+            .Should()
+            .NotHaveDependencyOnAny(ForbiddenFrameworkNamespaces)
             .GetResult();
 
         Assert.True(result.IsSuccessful, FailureMessage(result));

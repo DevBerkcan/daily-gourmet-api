@@ -2,7 +2,9 @@
 
 .NET 10 / ASP.NET Core Backend für die Daily-Gourmet-Catering-SaaS. Clean-Architecture-Solution mit vier Layern (`Domain → Application → Infrastructure → Api`), MS SQL Server (EF Core), Minimal APIs.
 
-> Architektur-, Datenbank- und Planungsdokumentation liegt in [`docs/`](docs/) dieses Repos: [`ARCHITECTURE_PLAN.md`](docs/ARCHITECTURE_PLAN.md), [`DATABASE.md`](docs/DATABASE.md) (vollständiges Mermaid-ER-Diagramm), [`FRONTEND_CONTRACT_MATRIX.md`](docs/FRONTEND_CONTRACT_MATRIX.md), [`OPEN_QUESTIONS.md`](docs/OPEN_QUESTIONS.md), [`adr/`](docs/adr/), plus die ursprünglichen Planungsdokumente `backend-architektur.md`/`api-endpunkte.md`.
+> Architektur-, Datenbank- und Planungsdokumentation liegt in [`docs/`](docs/) dieses Repos: [`ARCHITECTURE_PLAN.md`](docs/ARCHITECTURE_PLAN.md), [`DATABASE.md`](docs/DATABASE.md) (vollständiges Mermaid-ER-Diagramm), [`FRONTEND_CONTRACT_MATRIX.md`](docs/FRONTEND_CONTRACT_MATRIX.md), [`OPEN_QUESTIONS.md`](docs/OPEN_QUESTIONS.md), [`TESTING.md`](docs/TESTING.md) (Teststrategie + CI-Gate), [`adr/`](docs/adr/), plus die ursprünglichen Planungsdokumente `backend-architektur.md`/`api-endpunkte.md`.
+
+[![CI](https://github.com/DevBerkcan/daily-gourmet-api/actions/workflows/ci.yml/badge.svg)](https://github.com/DevBerkcan/daily-gourmet-api/actions/workflows/ci.yml)
 
 ## Aktueller Stand: Phase 1 — Foundation
 
@@ -17,7 +19,8 @@ backend/
   Directory.Packages.props     # zentrale Paketverwaltung
   Dockerfile
   docker-compose.yml           # mssql + api für lokale Entwicklung
-  docs/                        # Architektur-/DB-/Planungsdokumentation, ADRs
+  .github/workflows/ci.yml     # Build + Test bei jedem Push/PR nach main
+  docs/                        # Architektur-/DB-/Planungsdokumentation, Teststrategie, ADRs
   src/
     DailyGourmet.Domain/
     DailyGourmet.Application/
