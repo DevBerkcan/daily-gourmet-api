@@ -1,9 +1,0 @@
-<Project>
-
-  <!-- Erbt von backend/Directory.Build.props. Testmethodennamen dürfen im Given_When_Then-Stil
-       Unterstriche verwenden (übliche xUnit-Konvention) — CA1707 ist dafür nicht sinnvoll. -->
-  <PropertyGroup>
-    <NoWarn>$(NoWarn);CA1707</NoWarn>
-  </PropertyGroup>
-
-</Project>
