@@ -90,6 +90,26 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
         return await GetByIdAsync(id, ct);
     }
 
+    public async Task<OrderDto> ConfirmAsync(Guid id, CancellationToken ct = default)
+    {
+        var order = await db.Orders.FirstOrDefaultAsync(o => o.Id == id, ct) ?? throw new NotFoundException(nameof(Order), id);
+        if (order.Status != OrderStatus.SUBMITTED) throw new ConflictException("Nur abgesendete Bestellungen können bestätigt werden.");
+        order.Status = OrderStatus.CONFIRMED;
+        order.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return await GetByIdAsync(id, ct);
+    }
+
+    public async Task<OrderDto> LockAsync(Guid id, CancellationToken ct = default)
+    {
+        var order = await db.Orders.FirstOrDefaultAsync(o => o.Id == id, ct) ?? throw new NotFoundException(nameof(Order), id);
+        if (order.Status != OrderStatus.CONFIRMED) throw new ConflictException("Nur bestätigte Bestellungen können gesperrt werden.");
+        order.Status = OrderStatus.LOCKED;
+        order.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return await GetByIdAsync(id, ct);
+    }
+
     public async Task<OrderDto> OverrideAsync(Guid id, OverrideOrderDto dto, CancellationToken ct = default)
     {
         var order = await db.Orders.FirstOrDefaultAsync(o => o.Id == id, ct) ?? throw new NotFoundException(nameof(Order), id);

@@ -9,22 +9,26 @@ namespace DailyGourmet.Api.Controllers;
 
 [ApiController]
 [Route("api/users")]
-[Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,FACILITY_ADMIN")]
+[Authorize]
 public class UsersController(UserManagementHandler handler) : ControllerBase
 {
     [HttpGet]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,FACILITY_ADMIN,FACILITY_USER")]
     public async Task<ActionResult<ApiResponse<PagedResult<UserDto>>>> List([FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default) =>
         Ok(ApiResponse<PagedResult<UserDto>>.Ok(await handler.ListAsync(page, pageSize, ct)));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,FACILITY_ADMIN")]
     public async Task<ActionResult<ApiResponse<UserDto>>> GetById(Guid id, CancellationToken ct) =>
         Ok(ApiResponse<UserDto>.Ok(await handler.GetByIdAsync(id, ct)));
 
     [HttpPost]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,FACILITY_ADMIN")]
     public async Task<ActionResult<ApiResponse<UserDto>>> Invite([FromBody] InviteUserDto dto, CancellationToken ct) =>
         Ok(ApiResponse<UserDto>.Ok(await handler.InviteAsync(dto, ct)));
 
     [HttpPut("{id:guid}")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,FACILITY_ADMIN")]
     public async Task<ActionResult<ApiResponse<UserDto>>> Update(Guid id, [FromBody] UpdateUserDto dto, CancellationToken ct) =>
         Ok(ApiResponse<UserDto>.Ok(await handler.UpdateAsync(id, dto, ct)));
 

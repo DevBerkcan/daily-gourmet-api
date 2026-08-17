@@ -1,3 +1,4 @@
+using DailyGourmet.Api.Authentication;
 using DailyGourmet.Api.Helpers;
 using DailyGourmet.Api.Models.DTOs;
 using DailyGourmet.Api.Models.DTOs.Facilities;
@@ -11,7 +12,8 @@ namespace DailyGourmet.Api.Handlers;
 public class FacilityHandler(
     IRepository<Facility> facilities,
     IRepository<Location> locations,
-    ITenantSettingsRepository tenantSettings)
+    ITenantSettingsRepository tenantSettings,
+    ITenantContext tenantContext)
 {
     public async Task<PagedResult<FacilityDto>> ListAsync(string? search, Guid? locationId, int page, int pageSize, CancellationToken ct = default)
     {
@@ -36,6 +38,8 @@ public class FacilityHandler(
     {
         var facility = await facilities.Query().Include(f => f.Location).FirstOrDefaultAsync(f => f.Id == id, ct)
             ?? throw new NotFoundException(nameof(Facility), id);
+        if (tenantContext.FacilityId is { } own && own != id)
+            throw new ForbiddenException("Kein Zugriff auf eine andere Einrichtung.");
         return ToDto(facility);
     }
 

@@ -14,6 +14,8 @@ public class SupportTicketReplyDto
 public class SupportTicketDto
 {
     public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public string TenantName { get; set; } = string.Empty;
     public string TicketNumber { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
     public string Priority { get; set; } = string.Empty;

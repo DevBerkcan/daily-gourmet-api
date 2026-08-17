@@ -22,6 +22,7 @@ public class RouteStopDto
     public Guid Id { get; set; }
     public Guid FacilityId { get; set; }
     public string FacilityName { get; set; } = string.Empty;
+    public string FacilityAddress { get; set; } = string.Empty;
     public int SequenceNumber { get; set; }
     public TimeSpan PlannedArrivalTime { get; set; }
     public TimeSpan? DeliveryWindowStart { get; set; }

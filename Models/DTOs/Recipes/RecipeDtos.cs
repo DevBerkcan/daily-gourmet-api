@@ -32,6 +32,8 @@ public class RecipeDto
     public string? ShelfLifeAfterPrep { get; set; }
     public bool Active { get; set; }
     public int Version { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
     public string CreatedByUserName { get; set; } = string.Empty;
     public string[] PrepSteps { get; set; } = [];
     public List<RecipeIngredientDto> Ingredients { get; set; } = [];
@@ -41,6 +43,8 @@ public class RecipeDto
     public bool AdditivesAreOverridden { get; set; }
     public string? NutriScore { get; set; }
     public bool NutritionIsAuthoritative { get; set; }
+    public Guid[] TargetGroupIds { get; set; } = [];
+    public string[] TargetGroupNames { get; set; } = [];
 }
 
 public class SaveRecipeIngredientDto
@@ -62,6 +66,7 @@ public class SaveRecipeDto
     [Required] public Difficulty Difficulty { get; set; }
     public bool Vegetarian { get; set; }
     public bool Vegan { get; set; }
+    public bool Active { get; set; } = true;
     public string? ProductionNotes { get; set; }
     public string? ImageUrl { get; set; }
     public decimal? CoreTemperatureC { get; set; }

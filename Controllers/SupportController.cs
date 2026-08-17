@@ -34,10 +34,32 @@ public class SupportController(SupportTicketHandler handler) : ControllerBase
 }
 
 [ApiController]
+[Route("api/support/session")]
+[Authorize]
+public class TenantSupportSessionController(SupportSessionHandler handler) : ControllerBase
+{
+    [HttpGet("current")]
+    public async Task<ActionResult<ApiResponse<SupportSessionDto?>>> Current(CancellationToken ct) =>
+        Ok(ApiResponse<SupportSessionDto?>.Ok(await handler.GetCurrentForCallerTenantAsync(ct)));
+
+    [HttpPost("end")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse>> End(CancellationToken ct)
+    {
+        await handler.EndCurrentForCallerTenantAsync(ct);
+        return Ok(ApiResponse.Ok());
+    }
+}
+
+[ApiController]
 [Route("api/super-admin")]
 [Authorize(Roles = "SUPER_ADMIN")]
 public class SupportSessionsController(SupportSessionHandler handler) : ControllerBase
 {
+    [HttpGet("tenants/{tenantId:guid}/support-sessions/current")]
+    public async Task<ActionResult<ApiResponse<SupportSessionDto?>>> Current(Guid tenantId, CancellationToken ct) =>
+        Ok(ApiResponse<SupportSessionDto?>.Ok(await handler.GetCurrentForTenantAsync(tenantId, ct)));
+
     [HttpPost("tenants/{tenantId:guid}/support-sessions")]
     public async Task<ActionResult<ApiResponse<SupportSessionDto>>> Start(Guid tenantId, CancellationToken ct) =>
         Ok(ApiResponse<SupportSessionDto>.Ok(await handler.StartAsync(tenantId, ct)));

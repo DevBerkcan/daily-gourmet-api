@@ -45,6 +45,16 @@ public class OrdersController(OrderHandler handler) : ControllerBase
     public async Task<ActionResult<ApiResponse<OrderDto>>> Submit(Guid id, CancellationToken ct) =>
         Ok(ApiResponse<OrderDto>.Ok(await handler.SubmitAsync(id, ct)));
 
+    [HttpPost("{id:guid}/confirm")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse<OrderDto>>> Confirm(Guid id, CancellationToken ct) =>
+        Ok(ApiResponse<OrderDto>.Ok(await handler.ConfirmAsync(id, ct)));
+
+    [HttpPost("{id:guid}/lock")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse<OrderDto>>> Lock(Guid id, CancellationToken ct) =>
+        Ok(ApiResponse<OrderDto>.Ok(await handler.LockAsync(id, ct)));
+
     [HttpPost("{id:guid}/override")]
     [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<OrderDto>>> Override(Guid id, [FromBody] OverrideOrderDto dto, CancellationToken ct) =>

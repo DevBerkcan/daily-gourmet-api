@@ -13,6 +13,7 @@ public class SupportTicketHandler(DailyGourmetDbContext db, ITenantContext tenan
 {
     private static IQueryable<SupportTicket> FullQuery(DailyGourmetDbContext db) => db.SupportTickets
         .Include(t => t.CreatedByUser)
+        .Include(t => t.Tenant)
         .Include(t => t.Replies).ThenInclude(r => r.AuthorUser);
 
     public async Task<PagedResult<SupportTicketDto>> ListAsync(string? status, int page, int pageSize, CancellationToken ct = default)
@@ -70,7 +71,7 @@ public class SupportTicketHandler(DailyGourmetDbContext db, ITenantContext tenan
 
     private static SupportTicketDto ToDto(SupportTicket t) => new()
     {
-        Id = t.Id, TicketNumber = t.TicketNumber, Category = t.Category.ToString(), Priority = t.Priority.ToString(),
+        Id = t.Id, TenantId = t.TenantId, TenantName = t.Tenant?.Name ?? string.Empty, TicketNumber = t.TicketNumber, Category = t.Category.ToString(), Priority = t.Priority.ToString(),
         Title = t.Title, Message = t.Message, PageUrl = t.PageUrl, Status = t.Status.ToString(),
         CreatedByUserName = t.CreatedByUser?.Name ?? string.Empty, CreatedAt = t.CreatedAt,
         Replies = t.Replies.OrderBy(r => r.CreatedAt).Select(r => new SupportTicketReplyDto { Id = r.Id, AuthorName = r.AuthorUser?.Name ?? string.Empty, Role = r.Role.ToString(), Text = r.Text, CreatedAt = r.CreatedAt }).ToList(),

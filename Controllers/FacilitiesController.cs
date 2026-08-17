@@ -10,10 +10,11 @@ namespace DailyGourmet.Api.Controllers;
 
 [ApiController]
 [Route("api/facilities")]
-[Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+[Authorize]
 public class FacilitiesController(FacilityHandler handler, ITenantContext tenantContext) : ControllerBase
 {
     [HttpGet]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<PagedResult<FacilityDto>>>> List(
         [FromQuery] string? search, [FromQuery] Guid? locationId,
         [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default)
@@ -23,6 +24,7 @@ public class FacilitiesController(FacilityHandler handler, ITenantContext tenant
     }
 
     [HttpGet("{id:guid}")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,FACILITY_ADMIN,FACILITY_USER")]
     public async Task<ActionResult<ApiResponse<FacilityDto>>> GetById(Guid id, CancellationToken ct)
     {
         var result = await handler.GetByIdAsync(id, ct);
@@ -30,6 +32,7 @@ public class FacilitiesController(FacilityHandler handler, ITenantContext tenant
     }
 
     [HttpPost]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<FacilityDto>>> Create([FromBody] CreateFacilityDto dto, CancellationToken ct)
     {
         var tenantId = tenantContext.TenantId ?? throw new ValidationException("Kein Mandantenkontext vorhanden.");
@@ -38,6 +41,7 @@ public class FacilitiesController(FacilityHandler handler, ITenantContext tenant
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<FacilityDto>>> Update(Guid id, [FromBody] UpdateFacilityDto dto, CancellationToken ct)
     {
         var result = await handler.UpdateAsync(id, dto, ct);

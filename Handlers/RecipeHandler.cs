@@ -17,7 +17,8 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
         .Include(r => r.Ingredients).ThenInclude(ri => ri.Ingredient).ThenInclude(i => i.Allergens).ThenInclude(a => a.Allergen)
         .Include(r => r.Ingredients).ThenInclude(ri => ri.Ingredient).ThenInclude(i => i.Additives)
         .Include(r => r.AllergenOverrides)
-        .Include(r => r.AdditiveOverrides);
+        .Include(r => r.AdditiveOverrides)
+        .Include(r => r.TargetGroups).ThenInclude(tg => tg.TargetAudienceGroupEntity);
 
     public async Task<PagedResult<RecipeDto>> ListAsync(string? search, Guid? category, bool? active, int page, int pageSize, CancellationToken ct = default)
     {
@@ -56,8 +57,9 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             CoreTemperatureC = dto.CoreTemperatureC,
             StorageNote = dto.StorageNote,
             ShelfLifeAfterPrep = dto.ShelfLifeAfterPrep,
-            Active = true,
+            Active = dto.Active,
             Version = 1,
+            CreatedAt = DateTime.UtcNow,
         };
         db.Recipes.Add(recipe);
         ApplyChildren(recipe, dto);
@@ -86,6 +88,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
         recipe.CoreTemperatureC = dto.CoreTemperatureC;
         recipe.StorageNote = dto.StorageNote;
         recipe.ShelfLifeAfterPrep = dto.ShelfLifeAfterPrep;
+        recipe.Active = dto.Active;
         recipe.Version += 1;
         recipe.UpdatedAt = DateTime.UtcNow;
 
@@ -123,6 +126,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             ShelfLifeAfterPrep = source.ShelfLifeAfterPrep,
             Active = true,
             Version = 1,
+            CreatedAt = DateTime.UtcNow,
         };
         db.Recipes.Add(copy);
         foreach (var step in source.PrepSteps)
@@ -209,6 +213,8 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             ShelfLifeAfterPrep = r.ShelfLifeAfterPrep,
             Active = r.Active,
             Version = r.Version,
+            CreatedAt = r.CreatedAt,
+            UpdatedAt = r.UpdatedAt,
             CreatedByUserName = r.CreatedByUser?.Name ?? string.Empty,
             PrepSteps = r.PrepSteps.OrderBy(s => s.StepNumber).Select(s => s.Text).ToArray(),
             Ingredients = r.Ingredients.Select(ri => new RecipeIngredientDto
@@ -221,6 +227,8 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             AdditivesAreOverridden = additivesOverridden,
             NutriScore = r.NutriScore?.ToString(),
             NutritionIsAuthoritative = r.Nutrition != null,
+            TargetGroupIds = r.TargetGroups.Select(tg => tg.TargetAudienceGroupId).ToArray(),
+            TargetGroupNames = r.TargetGroups.Select(tg => tg.TargetAudienceGroupEntity?.Name ?? string.Empty).Where(n => n != string.Empty).ToArray(),
         };
     }
 }

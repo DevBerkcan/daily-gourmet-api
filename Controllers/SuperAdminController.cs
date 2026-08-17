@@ -12,8 +12,14 @@ namespace DailyGourmet.Api.Controllers;
 [ApiController]
 [Route("api/super-admin")]
 [Authorize(Roles = "SUPER_ADMIN")]
-public class SuperAdminController(SuperAdminHandler handler) : ControllerBase
+public class SuperAdminController(SuperAdminHandler handler, AuditLogHandler auditLogHandler) : ControllerBase
 {
+    [HttpGet("audit-logs")]
+    public async Task<ActionResult<ApiResponse<PagedResult<GlobalAuditLogDto>>>> AuditLogs(
+        [FromQuery] Guid? tenantId, [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default) =>
+        Ok(ApiResponse<PagedResult<GlobalAuditLogDto>>.Ok(await auditLogHandler.ListForSuperAdminAsync(tenantId, page, pageSize, ct)));
+
+
     [HttpGet("dashboard")]
     public async Task<ActionResult<ApiResponse<SuperAdminDashboardDto>>> Dashboard(CancellationToken ct) =>
         Ok(ApiResponse<SuperAdminDashboardDto>.Ok(await handler.DashboardAsync(ct)));

@@ -33,8 +33,16 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
         return new PagedResult<DeliveryRouteDto> { Items = items.Select(ToDto).ToList(), Total = total, Page = page, PageSize = pageSize };
     }
 
-    public async Task<DeliveryRouteDto> GetByIdAsync(Guid id, CancellationToken ct = default) =>
-        ToDto(await FullQuery(db).FirstOrDefaultAsync(r => r.Id == id, ct) ?? throw new NotFoundException(nameof(DeliveryRoute), id));
+    public async Task<DeliveryRouteDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var route = await FullQuery(db).FirstOrDefaultAsync(r => r.Id == id, ct) ?? throw new NotFoundException(nameof(DeliveryRoute), id);
+        if (tenantContext.Role == "DRIVER")
+        {
+            var driver = await GetCallerDriverAsync(ct);
+            if (route.DriverId != driver.Id) throw new ForbiddenException("Kein Zugriff auf diese Route.");
+        }
+        return ToDto(route);
+    }
 
     public async Task<DeliveryRouteDto> CreateAsync(CreateRouteDto dto, CancellationToken ct = default)
     {
@@ -154,7 +162,7 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
         PlannedReturnTime = r.PlannedReturnTime, DistanceKm = r.DistanceKm, Status = r.Status.ToString(),
         Stops = r.Stops.OrderBy(s => s.SequenceNumber).Select(s => new RouteStopDto
         {
-            Id = s.Id, FacilityId = s.FacilityId, FacilityName = s.Facility?.Name ?? string.Empty, SequenceNumber = s.SequenceNumber,
+            Id = s.Id, FacilityId = s.FacilityId, FacilityName = s.Facility?.Name ?? string.Empty, FacilityAddress = s.Facility?.Address ?? string.Empty, SequenceNumber = s.SequenceNumber,
             PlannedArrivalTime = s.PlannedArrivalTime, DeliveryWindowStart = s.DeliveryWindowStart, DeliveryWindowEnd = s.DeliveryWindowEnd,
             ContactName = s.ContactName, ContactPhone = s.ContactPhone, Note = s.Note, Status = s.Status.ToString(), ProblemNote = s.ProblemNote, DeliveredAt = s.DeliveredAt,
             Items = s.Items.Select(i => new RouteStopItemDto

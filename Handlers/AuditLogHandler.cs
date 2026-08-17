@@ -25,4 +25,23 @@ public class AuditLogHandler(DailyGourmetDbContext db, ITenantContext tenantCont
             Total = total, Page = page, PageSize = pageSize,
         };
     }
+
+    /// <summary>Cross-tenant audit trail for the Super Admin — unlike <see cref="ListAsync"/>, not scoped to the caller's tenant.</summary>
+    public async Task<PagedResult<GlobalAuditLogDto>> ListForSuperAdminAsync(Guid? tenantId, int page, int pageSize, CancellationToken ct = default)
+    {
+        var query = db.AuditLogs.IgnoreQueryFilters().Include(a => a.User).Include(a => a.Tenant).AsQueryable();
+        if (tenantId is { } tid) query = query.Where(a => a.TenantId == tid);
+
+        var total = await query.CountAsync(ct);
+        var items = await query.OrderByDescending(a => a.CreatedAtUtc).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+        return new PagedResult<GlobalAuditLogDto>
+        {
+            Items = items.Select(a => new GlobalAuditLogDto
+            {
+                Id = a.Id, Action = a.Action, Entity = a.Entity, EntityId = a.EntityId, Reason = a.Reason,
+                UserName = a.User?.Name ?? "System", TenantName = a.Tenant?.Name, CreatedAtUtc = a.CreatedAtUtc,
+            }).ToList(),
+            Total = total, Page = page, PageSize = pageSize,
+        };
+    }
 }

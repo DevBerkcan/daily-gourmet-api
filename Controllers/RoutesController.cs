@@ -13,7 +13,7 @@ namespace DailyGourmet.Api.Controllers;
 public class RoutesController(DeliveryRouteHandler handler) : ControllerBase
 {
     [HttpGet]
-    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,KITCHEN_MANAGER,KITCHEN_STAFF")]
     public async Task<ActionResult<ApiResponse<PagedResult<DeliveryRouteDto>>>> List(
         [FromQuery] DateOnly? date, [FromQuery] Guid? driverId, [FromQuery] string? status,
         [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default)

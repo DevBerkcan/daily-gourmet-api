@@ -14,7 +14,9 @@ public class UserManagementHandler(IRepository<User> users, ITenantContext tenan
 {
     public async Task<PagedResult<UserDto>> ListAsync(int page, int pageSize, CancellationToken ct = default)
     {
-        var query = users.Query().Include(u => u.Facility);
+        IQueryable<User> query = users.Query().Include(u => u.Facility);
+        if (tenantContext.Role is "FACILITY_ADMIN" or "FACILITY_USER")
+            query = query.Where(u => u.FacilityId == tenantContext.FacilityId);
         var total = await query.CountAsync(ct);
         var items = await query.OrderBy(u => u.Name).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
         return new PagedResult<UserDto> { Items = items.Select(ToDto).ToList(), Total = total, Page = page, PageSize = pageSize };

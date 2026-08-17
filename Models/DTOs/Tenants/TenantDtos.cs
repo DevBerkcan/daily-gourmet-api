@@ -120,3 +120,8 @@ public class AuditLogDto
     public string UserName { get; set; } = string.Empty;
     public DateTime CreatedAtUtc { get; set; }
 }
+
+public class GlobalAuditLogDto : AuditLogDto
+{
+    public string? TenantName { get; set; }
+}
