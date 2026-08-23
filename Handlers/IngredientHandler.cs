@@ -4,6 +4,7 @@ using DailyGourmet.Api.Helpers;
 using DailyGourmet.Api.Models.DTOs;
 using DailyGourmet.Api.Models.DTOs.Ingredients;
 using DailyGourmet.Api.Models.Entities;
+using DailyGourmet.Api.Models.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace DailyGourmet.Api.Handlers;
@@ -16,6 +17,7 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
             .Include(i => i.Category).Include(i => i.Supplier)
             .Include(i => i.Allergens).ThenInclude(a => a.Allergen)
             .Include(i => i.Additives)
+            .Include(i => i.SupplierPrices).ThenInclude(p => p.Supplier)
             .AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -35,6 +37,7 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
             .Include(i => i.Category).Include(i => i.Supplier)
             .Include(i => i.Allergens).ThenInclude(a => a.Allergen)
             .Include(i => i.Additives)
+            .Include(i => i.SupplierPrices).ThenInclude(p => p.Supplier)
             .FirstOrDefaultAsync(i => i.Id == id, ct) ?? throw new NotFoundException(nameof(Ingredient), id);
         return ToDto(ingredient);
     }
@@ -58,6 +61,7 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
             Bio = dto.Bio,
             Regional = dto.Regional,
             Active = true,
+            Source = IngredientSource.Manuell,
             Nutrition = new IngredientNutrition
             {
                 Kcal = dto.Nutrition.Kcal, ProteinG = dto.Nutrition.ProteinG, FatG = dto.Nutrition.FatG,
@@ -96,6 +100,9 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
             Kcal = dto.Nutrition.Kcal, ProteinG = dto.Nutrition.ProteinG, FatG = dto.Nutrition.FatG,
             CarbsG = dto.Nutrition.CarbsG, SugarG = dto.Nutrition.SugarG, SaltG = dto.Nutrition.SaltG,
         };
+        // A human just edited this ingredient — protect it from a future Rezeptrechner sync ever
+        // overwriting these changes again, regardless of where the row originally came from.
+        ingredient.IsManuallyEdited = true;
         ingredient.UpdatedAt = DateTime.UtcNow;
 
         db.IngredientAllergens.RemoveRange(ingredient.Allergens);
@@ -130,32 +137,203 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
         }
     }
 
-    private static IngredientDto ToDto(Ingredient i) => new()
+    // ---- Rezeptrechner sync (never overwrites a manually-edited ingredient) ----
+
+    public async Task<SyncResultDto> SyncAsync(List<RezeptrechnerImportRowDto> rows, CancellationToken ct = default)
     {
-        Id = i.Id,
-        Name = i.Name,
-        ArticleNumber = i.ArticleNumber,
-        CategoryId = i.CategoryId,
-        CategoryName = i.Category?.Name ?? string.Empty,
-        SupplierId = i.SupplierId,
-        SupplierName = i.Supplier?.Name,
-        BaseUnit = i.BaseUnit.ToString(),
-        PurchaseUnit = i.PurchaseUnit,
-        ConversionFactor = i.ConversionFactor,
-        PurchasePrice = i.PurchasePrice,
-        Vegetarian = i.Vegetarian,
-        Vegan = i.Vegan,
-        Bio = i.Bio,
-        Regional = i.Regional,
-        Active = i.Active,
-        Nutrition = new NutritionDto
+        var tenantId = tenantContext.TenantId!.Value;
+        var externalRefIds = rows.Select(r => r.ExternalRefId).ToList();
+        var existing = await db.Ingredients
+            .Where(i => i.ExternalRefId != null && externalRefIds.Contains(i.ExternalRefId))
+            .ToDictionaryAsync(i => i.ExternalRefId!, ct);
+
+        var categories = await db.IngredientCategories.ToListAsync(ct);
+        var fallbackCategoryId = categories.FirstOrDefault()?.Id
+            ?? throw new ValidationException("Keine Zutatenkategorie vorhanden — bitte zuerst mindestens eine Kategorie anlegen.");
+
+        var result = new SyncResultDto();
+        var now = DateTime.UtcNow;
+
+        foreach (var row in rows)
         {
-            Kcal = i.Nutrition.Kcal, ProteinG = i.Nutrition.ProteinG, FatG = i.Nutrition.FatG,
-            CarbsG = i.Nutrition.CarbsG, SugarG = i.Nutrition.SugarG, SaltG = i.Nutrition.SaltG,
-            Source = i.Nutrition.Source.ToString(),
-        },
-        AllergenNames = i.Allergens.Select(a => a.Allergen?.Name ?? string.Empty).Where(n => n != string.Empty).ToArray(),
-        AllergenIds = i.Allergens.Select(a => a.AllergenId).ToArray(),
-        Additives = i.Additives.Select(a => a.Text).ToArray(),
+            var categoryId = categories.FirstOrDefault(c => string.Equals(c.Name, row.CategoryName, StringComparison.OrdinalIgnoreCase))?.Id ?? fallbackCategoryId;
+
+            if (existing.TryGetValue(row.ExternalRefId, out var ingredient))
+            {
+                if (ingredient.IsManuallyEdited)
+                {
+                    result.SkippedManuallyEdited++;
+                    continue;
+                }
+
+                ingredient.Name = row.Name.Trim();
+                ingredient.ArticleNumber = row.ArticleNumber.Trim();
+                ingredient.CategoryId = categoryId;
+                ingredient.BaseUnit = row.BaseUnit;
+                ingredient.PurchaseUnit = row.PurchaseUnit;
+                ingredient.ConversionFactor = row.ConversionFactor;
+                ingredient.PurchasePrice = row.PurchasePrice;
+                if (row.Nutrition is { } n)
+                {
+                    ingredient.Nutrition = new IngredientNutrition
+                    {
+                        Kcal = n.Kcal, ProteinG = n.ProteinG, FatG = n.FatG,
+                        CarbsG = n.CarbsG, SugarG = n.SugarG, SaltG = n.SaltG,
+                        Source = NutritionSource.Manuell,
+                    };
+                }
+                ingredient.LastSyncedAt = now;
+                ingredient.UpdatedAt = now;
+                result.Updated++;
+            }
+            else
+            {
+                db.Ingredients.Add(new Ingredient
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    CategoryId = categoryId,
+                    Name = row.Name.Trim(),
+                    ArticleNumber = row.ArticleNumber.Trim(),
+                    BaseUnit = row.BaseUnit,
+                    PurchaseUnit = row.PurchaseUnit,
+                    ConversionFactor = row.ConversionFactor <= 0 ? 1 : row.ConversionFactor,
+                    PurchasePrice = row.PurchasePrice,
+                    Active = true,
+                    Source = IngredientSource.Rezeptrechner,
+                    ExternalRefId = row.ExternalRefId,
+                    IsManuallyEdited = false,
+                    LastSyncedAt = now,
+                    CreatedAt = now,
+                    Nutrition = row.Nutrition is { } newNutrition
+                        ? new IngredientNutrition
+                        {
+                            Kcal = newNutrition.Kcal, ProteinG = newNutrition.ProteinG, FatG = newNutrition.FatG,
+                            CarbsG = newNutrition.CarbsG, SugarG = newNutrition.SugarG, SaltG = newNutrition.SaltG,
+                            Source = NutritionSource.Manuell,
+                        }
+                        : new IngredientNutrition(),
+                });
+                result.Added++;
+            }
+        }
+
+        await db.SaveChangesAsync(ct);
+        return result;
+    }
+
+    // ---- Supplier prices ----
+
+    public async Task<List<IngredientSupplierPriceDto>> ListPricesAsync(Guid ingredientId, CancellationToken ct = default)
+    {
+        await EnsureIngredientExistsAsync(ingredientId, ct);
+        var prices = await db.IngredientSupplierPrices.Include(p => p.Supplier)
+            .Where(p => p.IngredientId == ingredientId).OrderBy(p => p.Price).ToListAsync(ct);
+        return prices.Select(ToPriceDto).ToList();
+    }
+
+    public async Task<IngredientSupplierPriceDto> AddPriceAsync(Guid ingredientId, SaveIngredientSupplierPriceDto dto, CancellationToken ct = default)
+    {
+        await EnsureIngredientExistsAsync(ingredientId, ct);
+        var price = new IngredientSupplierPrice
+        {
+            Id = Guid.NewGuid(),
+            IngredientId = ingredientId,
+            SupplierId = dto.SupplierId,
+            SupplierArticleNumber = dto.SupplierArticleNumber.Trim(),
+            Price = dto.Price,
+            Unit = dto.Unit,
+            AvailabilityNote = dto.AvailabilityNote,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.IngredientSupplierPrices.Add(price);
+        await db.SaveChangesAsync(ct);
+        return await LoadPriceDtoAsync(price.Id, ct);
+    }
+
+    public async Task<IngredientSupplierPriceDto> UpdatePriceAsync(Guid ingredientId, Guid priceId, SaveIngredientSupplierPriceDto dto, CancellationToken ct = default)
+    {
+        var price = await db.IngredientSupplierPrices.FirstOrDefaultAsync(p => p.Id == priceId && p.IngredientId == ingredientId, ct)
+            ?? throw new NotFoundException(nameof(IngredientSupplierPrice), priceId);
+        price.SupplierId = dto.SupplierId;
+        price.SupplierArticleNumber = dto.SupplierArticleNumber.Trim();
+        price.Price = dto.Price;
+        price.Unit = dto.Unit;
+        price.AvailabilityNote = dto.AvailabilityNote;
+        price.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return await LoadPriceDtoAsync(price.Id, ct);
+    }
+
+    public async Task DeletePriceAsync(Guid ingredientId, Guid priceId, CancellationToken ct = default)
+    {
+        var price = await db.IngredientSupplierPrices.FirstOrDefaultAsync(p => p.Id == priceId && p.IngredientId == ingredientId, ct)
+            ?? throw new NotFoundException(nameof(IngredientSupplierPrice), priceId);
+        db.IngredientSupplierPrices.Remove(price);
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task EnsureIngredientExistsAsync(Guid ingredientId, CancellationToken ct)
+    {
+        var exists = await db.Ingredients.AnyAsync(i => i.Id == ingredientId, ct);
+        if (!exists) throw new NotFoundException(nameof(Ingredient), ingredientId);
+    }
+
+    private async Task<IngredientSupplierPriceDto> LoadPriceDtoAsync(Guid priceId, CancellationToken ct) =>
+        ToPriceDto(await db.IngredientSupplierPrices.Include(p => p.Supplier).FirstAsync(p => p.Id == priceId, ct));
+
+    private static IngredientSupplierPriceDto ToPriceDto(IngredientSupplierPrice p) => new()
+    {
+        Id = p.Id,
+        IngredientId = p.IngredientId,
+        SupplierId = p.SupplierId,
+        SupplierName = p.Supplier?.Name ?? string.Empty,
+        SupplierArticleNumber = p.SupplierArticleNumber,
+        Price = p.Price,
+        Unit = p.Unit.ToString(),
+        AvailabilityNote = p.AvailabilityNote,
+        CreatedAt = p.CreatedAt,
+        UpdatedAt = p.UpdatedAt,
     };
+
+    private static IngredientDto ToDto(Ingredient i)
+    {
+        var cheapest = i.SupplierPrices.OrderBy(p => p.Price).FirstOrDefault();
+        return new IngredientDto
+        {
+            Id = i.Id,
+            Name = i.Name,
+            ArticleNumber = i.ArticleNumber,
+            CategoryId = i.CategoryId,
+            CategoryName = i.Category?.Name ?? string.Empty,
+            SupplierId = i.SupplierId,
+            SupplierName = i.Supplier?.Name,
+            BaseUnit = i.BaseUnit.ToString(),
+            PurchaseUnit = i.PurchaseUnit,
+            ConversionFactor = i.ConversionFactor,
+            PurchasePrice = i.PurchasePrice,
+            Vegetarian = i.Vegetarian,
+            Vegan = i.Vegan,
+            Bio = i.Bio,
+            Regional = i.Regional,
+            Active = i.Active,
+            Source = i.Source.ToString(),
+            ExternalRefId = i.ExternalRefId,
+            IsManuallyEdited = i.IsManuallyEdited,
+            LastSyncedAt = i.LastSyncedAt,
+            SupplierPrices = i.SupplierPrices.OrderBy(p => p.Price).Select(ToPriceDto).ToList(),
+            CheapestSupplierPriceId = cheapest?.Id,
+            CheapestSupplierName = cheapest?.Supplier?.Name,
+            CheapestPrice = cheapest?.Price,
+            Nutrition = new NutritionDto
+            {
+                Kcal = i.Nutrition.Kcal, ProteinG = i.Nutrition.ProteinG, FatG = i.Nutrition.FatG,
+                CarbsG = i.Nutrition.CarbsG, SugarG = i.Nutrition.SugarG, SaltG = i.Nutrition.SaltG,
+                Source = i.Nutrition.Source.ToString(),
+            },
+            AllergenNames = i.Allergens.Select(a => a.Allergen?.Name ?? string.Empty).Where(n => n != string.Empty).ToArray(),
+            AllergenIds = i.Allergens.Select(a => a.AllergenId).ToArray(),
+            Additives = i.Additives.Select(a => a.Text).ToArray(),
+        };
+    }
 }

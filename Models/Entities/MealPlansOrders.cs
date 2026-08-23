@@ -11,6 +11,13 @@ public class MealPlan : BaseEntity, ITenantScoped
     public int Year { get; set; }
     public MealPlanStatus Status { get; set; } = MealPlanStatus.DRAFT;
 
+    /// <summary>Marks this as one of up to 8 reusable base weeks ("Vorlage 1-8") rather than a
+    /// live week — duplicate-into-week works the same for templates and ordinary past weeks, this
+    /// flag just changes how it's listed/picked in the UI.</summary>
+    public bool IsTemplate { get; set; }
+    /// <summary>1-8 when IsTemplate is true, unique per tenant; null otherwise.</summary>
+    public int? TemplateSlot { get; set; }
+
     public ICollection<MealPlanLocation> Locations { get; set; } = new List<MealPlanLocation>();
     public ICollection<MealPlanFacility> Facilities { get; set; } = new List<MealPlanFacility>();
     public ICollection<MealPlanDay> Days { get; set; } = new List<MealPlanDay>();
@@ -52,6 +59,11 @@ public class MealPlanItem : BaseEntity
     public MealPlanDay MealPlanDay { get; set; } = null!;
     public Guid RecipeId { get; set; }
     public Recipe Recipe { get; set; } = null!;
+
+    /// <summary>Which parallel diet track this dish belongs to for the day. A day/line can hold
+    /// more than one item (e.g. a shared dessert alongside the main dish) since Items is already a
+    /// collection — no separate hierarchy needed.</summary>
+    public DietLine DietLine { get; set; } = DietLine.NORMALKOST;
 
     /// <summary>Populated at publish time with the recipe's name/nutrition/allergens frozen as of
     /// that moment, so later recipe edits can't retroactively change a published week.</summary>

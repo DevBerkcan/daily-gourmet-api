@@ -41,14 +41,18 @@ public class DeliveryRouteDto
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public DateOnly Date { get; set; }
-    public Guid DriverId { get; set; }
-    public string DriverName { get; set; } = string.Empty;
+    public Guid? DriverId { get; set; }
+    public string? DriverName { get; set; }
     public Guid? LocationId { get; set; }
     public string? LocationName { get; set; }
     public TimeSpan PlannedDepartureTime { get; set; }
     public TimeSpan? PlannedReturnTime { get; set; }
     public decimal? DistanceKm { get; set; }
     public string Status { get; set; } = string.Empty;
+    public bool HandoffWarmConfirmed { get; set; }
+    public bool HandoffKaltConfirmed { get; set; }
+    public bool HandoffDessertConfirmed { get; set; }
+    public DateTime? HandoffConfirmedAt { get; set; }
     public List<RouteStopDto> Stops { get; set; } = [];
 }
 
@@ -56,10 +60,19 @@ public class CreateRouteDto
 {
     [Required, MaxLength(200)] public string Name { get; set; } = string.Empty;
     [Required] public DateOnly Date { get; set; }
-    [Required] public Guid DriverId { get; set; }
+    /// <summary>Null lets admin create a route with stops before any driver has claimed it — see
+    /// DeliveryRouteHandler.ClaimAsync.</summary>
+    public Guid? DriverId { get; set; }
     public Guid? LocationId { get; set; }
     [Required] public TimeSpan PlannedDepartureTime { get; set; }
     [Required] public Guid[] FacilityIds { get; set; } = [];
+}
+
+public class ConfirmHandoffDto
+{
+    public bool WarmConfirmed { get; set; }
+    public bool KaltConfirmed { get; set; }
+    public bool DessertConfirmed { get; set; }
 }
 
 public class UpdateStopStatusDto

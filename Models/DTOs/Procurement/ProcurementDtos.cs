@@ -22,6 +22,8 @@ public class ProcurementListDto
     public int CalendarWeek { get; set; }
     public Guid LocationId { get; set; }
     public string LocationName { get; set; } = string.Empty;
+    public Guid? SupplierId { get; set; }
+    public string? SupplierName { get; set; }
     public string Status { get; set; } = string.Empty;
     public List<ProcurementListItemDto> Items { get; set; } = [];
 }

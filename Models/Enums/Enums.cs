@@ -5,8 +5,6 @@ public enum Role
     SUPER_ADMIN,
     TENANT_OWNER,
     TENANT_ADMIN,
-    KITCHEN_MANAGER,
-    KITCHEN_STAFF,
     FACILITY_ADMIN,
     FACILITY_USER,
     READ_ONLY,
@@ -72,6 +70,15 @@ public enum NutritionSource
     Manuell
 }
 
+/// <summary>Where an ingredient row originated — drives the sync-without-overwrite rule (see
+/// Ingredient.IsManuallyEdited): only REZEPTRECHNER rows the user hasn't since edited are safe
+/// for a re-sync to update.</summary>
+public enum IngredientSource
+{
+    Rezeptrechner,
+    Manuell
+}
+
 public enum MealPlanStatus
 {
     DRAFT,
@@ -79,6 +86,16 @@ public enum MealPlanStatus
     PUBLISHED,
     CLOSED,
     ARCHIVED
+}
+
+/// <summary>Menülinie — which parallel diet track a MealPlanItem belongs to within a day. A day can
+/// hold more than one item per line (e.g. a main dish plus a shared dessert).</summary>
+public enum DietLine
+{
+    NORMALKOST,
+    VEGGIE,
+    GLUTENFREI_LAKTOSEFREI,
+    ALTERNATIV
 }
 
 public enum OrderStatus
@@ -143,6 +160,8 @@ public enum ProcurementListStatus
 {
     DRAFT,
     REVIEWED,
+    READY_FOR_APPROVAL,
+    APPROVED,
     ORDERED,
     COMPLETED
 }

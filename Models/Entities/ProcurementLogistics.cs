@@ -8,10 +8,20 @@ public class ProcurementList : BaseEntity, ITenantScoped
     public Tenant Tenant { get; set; } = null!;
     public Guid LocationId { get; set; }
     public Location Location { get; set; } = null!;
+    /// <summary>Null = catch-all list for ingredients with no supplier price on record yet.
+    /// GenerateAsync splits one ProcurementList per supplier ("pro Einkaufsliste ein Lieferant").</summary>
+    public Guid? SupplierId { get; set; }
+    public Supplier? Supplier { get; set; }
 
     public string Label { get; set; } = null!;
     public int CalendarWeek { get; set; }
     public ProcurementListStatus Status { get; set; } = ProcurementListStatus.DRAFT;
+
+    /// <summary>Single-use, time-limited token emailed to the tenant owner on transition to
+    /// READY_FOR_APPROVAL — lets ProcurementListsController.Approve authorize the request without a
+    /// full login (see ProcurementListHandler.ApproveAsync).</summary>
+    public string? ApprovalToken { get; set; }
+    public DateTime? ApprovalTokenExpiresAt { get; set; }
 
     public ICollection<ProcurementListItem> Items { get; set; } = new List<ProcurementListItem>();
 }
@@ -32,8 +42,11 @@ public class DeliveryRoute : BaseEntity, ITenantScoped
 {
     public Guid TenantId { get; set; }
     public Tenant Tenant { get; set; } = null!;
-    public Guid DriverId { get; set; }
-    public Driver Driver { get; set; } = null!;
+    /// <summary>Null until a driver claims the route themselves (see
+    /// DeliveryRouteHandler.ClaimAsync) — admin can still create a route with stops before anyone
+    /// has picked it up.</summary>
+    public Guid? DriverId { get; set; }
+    public Driver? Driver { get; set; }
     public Guid? LocationId { get; set; }
     public Location? Location { get; set; }
 
@@ -43,6 +56,14 @@ public class DeliveryRoute : BaseEntity, ITenantScoped
     public TimeSpan? PlannedReturnTime { get; set; }
     public decimal? DistanceKm { get; set; }
     public RouteStatus Status { get; set; } = RouteStatus.GEPLANT;
+
+    /// <summary>Replaces the removed Küche module's confirmation step: before a driver can start
+    /// loading (GEPLANT → BELADUNG), they confirm they've received the three meal components from
+    /// the kitchen. Coarse per-route gate, not per-stop — see DeliveryRouteHandler.ConfirmHandoffAsync.</summary>
+    public bool HandoffWarmConfirmed { get; set; }
+    public bool HandoffKaltConfirmed { get; set; }
+    public bool HandoffDessertConfirmed { get; set; }
+    public DateTime? HandoffConfirmedAt { get; set; }
 
     public ICollection<RouteStop> Stops { get; set; } = new List<RouteStop>();
 }

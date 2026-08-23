@@ -13,10 +13,10 @@ public class OrdersController(OrderHandler handler) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<ApiResponse<PagedResult<OrderDto>>>> List(
-        [FromQuery] Guid? facilityId, [FromQuery] Guid? mealPlanId, [FromQuery] string? status,
+        [FromQuery] Guid? facilityId, [FromQuery] Guid? mealPlanId, [FromQuery] int? calendarWeek, [FromQuery] string? status,
         [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default)
     {
-        var result = await handler.ListAsync(facilityId, mealPlanId, status, page, pageSize, ct);
+        var result = await handler.ListAsync(facilityId, mealPlanId, calendarWeek, status, page, pageSize, ct);
         return Ok(ApiResponse<PagedResult<OrderDto>>.Ok(result));
     }
 
@@ -39,6 +39,11 @@ public class OrdersController(OrderHandler handler) : ControllerBase
         var result = await handler.SaveAsync(dto, ct);
         return Ok(ApiResponse<OrderDto>.Ok(result));
     }
+
+    [HttpPut("{id:guid}/adjust")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,FACILITY_ADMIN,FACILITY_USER")]
+    public async Task<ActionResult<ApiResponse<OrderDto>>> Adjust(Guid id, [FromBody] AdjustOrderDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<OrderDto>.Ok(await handler.AdjustSameDayAsync(id, dto, ct)));
 
     [HttpPost("{id:guid}/submit")]
     [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,FACILITY_ADMIN,FACILITY_USER")]

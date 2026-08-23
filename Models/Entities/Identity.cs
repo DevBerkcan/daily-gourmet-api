@@ -47,6 +47,15 @@ public class TenantSettings
     public bool UnpublishRequiresNoOrders { get; set; } = true;
     public string FacilityNumberPrefix { get; set; } = "DG-1";
     public string ArticleNumberPrefix { get; set; } = "ART-";
+    /// <summary>Nummernkreis-Konvention für Facility.RouteNumber ("Tour"), z. B. "RT" → RT1, RT2 —
+    /// hier nur als Referenz für die manuelle Vergabe hinterlegt, keine automatische Sequenz, da
+    /// echte Tournamen oft zusätzlichen Freitext tragen (z. B. "RT1 Dorsten Nord").</summary>
+    public string RouteNumberPrefix { get; set; } = "RT";
+
+    /// <summary>Second deadline layer, alongside DefaultOrderDeadlineOffsetDays/-Time: the cutoff on
+    /// the delivery day itself before which a facility may still reduce (never increase) an
+    /// already-submitted order's portions — see OrderHandler.AdjustSameDayAsync.</summary>
+    public TimeSpan SameDayAdjustmentDeadlineTime { get; set; } = new(9, 0, 0);
 }
 
 /// <summary>Per-event notification toggle for a tenant.</summary>

@@ -13,12 +13,12 @@ namespace DailyGourmet.Api.Controllers;
 public class RoutesController(DeliveryRouteHandler handler) : ControllerBase
 {
     [HttpGet]
-    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,KITCHEN_MANAGER,KITCHEN_STAFF")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,DRIVER")]
     public async Task<ActionResult<ApiResponse<PagedResult<DeliveryRouteDto>>>> List(
-        [FromQuery] DateOnly? date, [FromQuery] Guid? driverId, [FromQuery] string? status,
+        [FromQuery] DateOnly? date, [FromQuery] Guid? driverId, [FromQuery] string? status, [FromQuery] bool? unassigned,
         [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default)
     {
-        var result = await handler.ListAsync(date, driverId, status, page, pageSize, ct);
+        var result = await handler.ListAsync(date, driverId, status, unassigned, page, pageSize, ct);
         return Ok(ApiResponse<PagedResult<DeliveryRouteDto>>.Ok(result));
     }
 
@@ -43,7 +43,7 @@ public class RoutesController(DeliveryRouteHandler handler) : ControllerBase
         Ok(ApiResponse<DeliveryRouteDto>.Ok(await handler.UpdateStopStatusAsync(routeId, stopId, dto, ct)));
 
     [HttpPut("{routeId:guid}/stops/{stopId:guid}/items/{itemId:guid}/packed")]
-    [Authorize(Roles = "KITCHEN_STAFF,KITCHEN_MANAGER,TENANT_OWNER,TENANT_ADMIN")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<DeliveryRouteDto>>> SetPacked(Guid routeId, Guid stopId, Guid itemId, CancellationToken ct) =>
         Ok(ApiResponse<DeliveryRouteDto>.Ok(await handler.SetItemPackedAsync(routeId, stopId, itemId, ct)));
 
@@ -51,6 +51,16 @@ public class RoutesController(DeliveryRouteHandler handler) : ControllerBase
     [Authorize(Roles = "DRIVER")]
     public async Task<ActionResult<ApiResponse<DeliveryRouteDto>>> SetLoaded(Guid routeId, Guid stopId, Guid itemId, CancellationToken ct) =>
         Ok(ApiResponse<DeliveryRouteDto>.Ok(await handler.SetItemLoadedAsync(routeId, stopId, itemId, ct)));
+
+    [HttpPost("{id:guid}/claim")]
+    [Authorize(Roles = "DRIVER")]
+    public async Task<ActionResult<ApiResponse<DeliveryRouteDto>>> Claim(Guid id, CancellationToken ct) =>
+        Ok(ApiResponse<DeliveryRouteDto>.Ok(await handler.ClaimAsync(id, ct)));
+
+    [HttpPut("{id:guid}/handoff")]
+    [Authorize(Roles = "DRIVER")]
+    public async Task<ActionResult<ApiResponse<DeliveryRouteDto>>> Handoff(Guid id, [FromBody] ConfirmHandoffDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<DeliveryRouteDto>.Ok(await handler.ConfirmHandoffAsync(id, dto, ct)));
 }
 
 [ApiController]

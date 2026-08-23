@@ -13,10 +13,17 @@ public class MealPlansController(MealPlanHandler handler) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<ApiResponse<PagedResult<MealPlanDto>>>> List(
-        [FromQuery] int? year, [FromQuery] int? calendarWeek, [FromQuery] string? status,
+        [FromQuery] int? year, [FromQuery] int? calendarWeek, [FromQuery] string? status, [FromQuery] bool? isTemplate,
         [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default)
     {
-        var result = await handler.ListAsync(year, calendarWeek, status, page, pageSize, ct);
+        var result = await handler.ListAsync(year, calendarWeek, status, isTemplate, page, pageSize, ct);
+        return Ok(ApiResponse<PagedResult<MealPlanDto>>.Ok(result));
+    }
+
+    [HttpGet("templates")]
+    public async Task<ActionResult<ApiResponse<PagedResult<MealPlanDto>>>> Templates([FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default)
+    {
+        var result = await handler.ListAsync(null, null, null, true, page, pageSize, ct);
         return Ok(ApiResponse<PagedResult<MealPlanDto>>.Ok(result));
     }
 
@@ -35,9 +42,20 @@ public class MealPlansController(MealPlanHandler handler) : ControllerBase
     public async Task<ActionResult<ApiResponse<MealPlanDto>>> Update(Guid id, [FromBody] UpdateMealPlanDto dto, CancellationToken ct) =>
         Ok(ApiResponse<MealPlanDto>.Ok(await handler.UpdateAsync(id, dto, ct)));
 
+    [HttpDelete("{id:guid}")]
+    public async Task<ActionResult<ApiResponse>> Delete(Guid id, CancellationToken ct)
+    {
+        await handler.DeleteAsync(id, ct);
+        return Ok(ApiResponse.Ok());
+    }
+
     [HttpPost("{id:guid}/duplicate")]
     public async Task<ActionResult<ApiResponse<MealPlanDto>>> Duplicate(Guid id, CancellationToken ct) =>
-        Ok(ApiResponse<MealPlanDto>.Ok(await handler.DuplicateAsync(id, ct)));
+        Ok(ApiResponse<MealPlanDto>.Ok(await handler.DuplicateAsync(id, ct: ct)));
+
+    [HttpPost("{id:guid}/duplicate-into-week")]
+    public async Task<ActionResult<ApiResponse<MealPlanDto>>> DuplicateIntoWeek(Guid id, [FromBody] DuplicateIntoWeekDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<MealPlanDto>.Ok(await handler.DuplicateAsync(id, dto.TargetYear, dto.TargetCalendarWeek, ct)));
 
     [HttpPost("{id:guid}/submit-review")]
     public async Task<ActionResult<ApiResponse<MealPlanDto>>> SubmitReview(Guid id, CancellationToken ct) =>

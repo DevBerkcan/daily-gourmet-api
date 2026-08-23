@@ -28,7 +28,7 @@ public class IngredientsController(IngredientHandler handler) : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,KITCHEN_MANAGER")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<IngredientDto>>> Create([FromBody] SaveIngredientDto dto, CancellationToken ct)
     {
         var result = await handler.CreateAsync(dto, ct);
@@ -36,7 +36,7 @@ public class IngredientsController(IngredientHandler handler) : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,KITCHEN_MANAGER")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<IngredientDto>>> Update(Guid id, [FromBody] SaveIngredientDto dto, CancellationToken ct)
     {
         var result = await handler.UpdateAsync(id, dto, ct);
@@ -44,10 +44,49 @@ public class IngredientsController(IngredientHandler handler) : ControllerBase
     }
 
     [HttpPost("{id:guid}/deactivate")]
-    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,KITCHEN_MANAGER")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse>> Deactivate(Guid id, CancellationToken ct)
     {
         await handler.DeactivateAsync(id, ct);
+        return Ok(ApiResponse.Ok());
+    }
+
+    [HttpPost("sync")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse<SyncResultDto>>> Sync([FromBody] List<RezeptrechnerImportRowDto> rows, CancellationToken ct)
+    {
+        var result = await handler.SyncAsync(rows, ct);
+        return Ok(ApiResponse<SyncResultDto>.Ok(result));
+    }
+
+    [HttpGet("{id:guid}/prices")]
+    public async Task<ActionResult<ApiResponse<List<IngredientSupplierPriceDto>>>> ListPrices(Guid id, CancellationToken ct)
+    {
+        var result = await handler.ListPricesAsync(id, ct);
+        return Ok(ApiResponse<List<IngredientSupplierPriceDto>>.Ok(result));
+    }
+
+    [HttpPost("{id:guid}/prices")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse<IngredientSupplierPriceDto>>> AddPrice(Guid id, [FromBody] SaveIngredientSupplierPriceDto dto, CancellationToken ct)
+    {
+        var result = await handler.AddPriceAsync(id, dto, ct);
+        return Ok(ApiResponse<IngredientSupplierPriceDto>.Ok(result));
+    }
+
+    [HttpPut("{id:guid}/prices/{priceId:guid}")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse<IngredientSupplierPriceDto>>> UpdatePrice(Guid id, Guid priceId, [FromBody] SaveIngredientSupplierPriceDto dto, CancellationToken ct)
+    {
+        var result = await handler.UpdatePriceAsync(id, priceId, dto, ct);
+        return Ok(ApiResponse<IngredientSupplierPriceDto>.Ok(result));
+    }
+
+    [HttpDelete("{id:guid}/prices/{priceId:guid}")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse>> DeletePrice(Guid id, Guid priceId, CancellationToken ct)
+    {
+        await handler.DeletePriceAsync(id, priceId, ct);
         return Ok(ApiResponse.Ok());
     }
 }

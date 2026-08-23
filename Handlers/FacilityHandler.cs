@@ -68,6 +68,7 @@ public class FacilityHandler(
             PortionPrice = dto.PortionPrice,
             Status = FacilityStatus.AKTIV,
             Notes = dto.Notes,
+            RouteNumber = dto.RouteNumber,
         };
         await facilities.AddAsync(facility, ct);
         await facilities.SaveChangesAsync(ct);
@@ -94,6 +95,7 @@ public class FacilityHandler(
         facility.PortionPrice = dto.PortionPrice;
         facility.Status = status;
         facility.Notes = dto.Notes;
+        facility.RouteNumber = dto.RouteNumber;
 
         facilities.Update(facility);
         await facilities.SaveChangesAsync(ct);
@@ -117,5 +119,6 @@ public class FacilityHandler(
         PortionPrice = f.PortionPrice,
         Status = f.Status.ToString(),
         Notes = f.Notes,
+        RouteNumber = f.RouteNumber,
     };
 }

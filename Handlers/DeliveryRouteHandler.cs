@@ -16,17 +16,18 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
     private static readonly OrderStatus[] BindingStatuses = [OrderStatus.SUBMITTED, OrderStatus.CONFIRMED, OrderStatus.LOCKED];
 
     private static IQueryable<DeliveryRoute> FullQuery(DailyGourmetDbContext db) => db.Routes
-        .Include(r => r.Driver).ThenInclude(d => d.User)
+        .Include(r => r.Driver!).ThenInclude(d => d.User)
         .Include(r => r.Location)
         .Include(r => r.Stops).ThenInclude(s => s.Facility)
         .Include(r => r.Stops).ThenInclude(s => s.Items).ThenInclude(i => i.Recipe);
 
-    public async Task<PagedResult<DeliveryRouteDto>> ListAsync(DateOnly? date, Guid? driverId, string? status, int page, int pageSize, CancellationToken ct = default)
+    public async Task<PagedResult<DeliveryRouteDto>> ListAsync(DateOnly? date, Guid? driverId, string? status, bool? unassigned, int page, int pageSize, CancellationToken ct = default)
     {
         var query = FullQuery(db).AsQueryable();
         if (date is { } d) query = query.Where(r => r.Date == d);
         if (driverId is { } did) query = query.Where(r => r.DriverId == did);
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<RouteStatus>(status, out var s)) query = query.Where(r => r.Status == s);
+        if (unassigned == true) query = query.Where(r => r.DriverId == null);
 
         var total = await query.CountAsync(ct);
         var items = await query.OrderByDescending(r => r.Date).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
@@ -91,10 +92,45 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
         var targetIndex = Array.IndexOf(RouteStatusOrder, target.ToString());
         if (targetIndex != currentIndex + 1) throw new ConflictException("Statuswechsel ist nur schrittweise vorwärts erlaubt.");
 
+        if (target == RouteStatus.BELADUNG && !(route.HandoffWarmConfirmed && route.HandoffKaltConfirmed && route.HandoffDessertConfirmed))
+            throw new ConflictException("Bitte zuerst die Übernahme aus der Küche bestätigen (warm, kalt, Dessert).");
+
         route.Status = target;
         route.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         return await GetByIdAsync(id, ct);
+    }
+
+    /// <summary>Self-service pick from the pool of unassigned routes ("Route übernehmen"),
+    /// replacing admin-assigns-driver as the default flow.</summary>
+    public async Task<DeliveryRouteDto> ClaimAsync(Guid routeId, CancellationToken ct = default)
+    {
+        var driver = await GetCallerDriverAsync(ct);
+        var route = await db.Routes.FirstOrDefaultAsync(r => r.Id == routeId, ct) ?? throw new NotFoundException(nameof(DeliveryRoute), routeId);
+        if (route.DriverId != null) throw new ConflictException("Diese Route ist bereits vergeben.");
+        if (route.Status != RouteStatus.GEPLANT) throw new ConflictException("Diese Route kann nicht mehr übernommen werden.");
+
+        route.DriverId = driver.Id;
+        route.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return await GetByIdAsync(routeId, ct);
+    }
+
+    /// <summary>Replaces the removed Küche module's confirmation step — see
+    /// DeliveryRoute.HandoffWarmConfirmed and the gate in UpdateStatusAsync.</summary>
+    public async Task<DeliveryRouteDto> ConfirmHandoffAsync(Guid routeId, ConfirmHandoffDto dto, CancellationToken ct = default)
+    {
+        var driver = await GetCallerDriverAsync(ct);
+        var route = await db.Routes.FirstOrDefaultAsync(r => r.Id == routeId, ct) ?? throw new NotFoundException(nameof(DeliveryRoute), routeId);
+        if (route.DriverId != driver.Id) throw new ForbiddenException("Kein Zugriff auf diese Route.");
+
+        route.HandoffWarmConfirmed = dto.WarmConfirmed;
+        route.HandoffKaltConfirmed = dto.KaltConfirmed;
+        route.HandoffDessertConfirmed = dto.DessertConfirmed;
+        route.HandoffConfirmedAt = dto.WarmConfirmed && dto.KaltConfirmed && dto.DessertConfirmed ? DateTime.UtcNow : null;
+        route.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return await GetByIdAsync(routeId, ct);
     }
 
     public async Task<List<DeliveryRouteDto>> CurrentDriverRoutesAsync(bool todayOnly, CancellationToken ct = default)
@@ -157,9 +193,11 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
 
     private static DeliveryRouteDto ToDto(DeliveryRoute r) => new()
     {
-        Id = r.Id, Name = r.Name, Date = r.Date, DriverId = r.DriverId, DriverName = r.Driver?.User?.Name ?? string.Empty,
+        Id = r.Id, Name = r.Name, Date = r.Date, DriverId = r.DriverId, DriverName = r.Driver?.User?.Name,
         LocationId = r.LocationId, LocationName = r.Location?.Name, PlannedDepartureTime = r.PlannedDepartureTime,
         PlannedReturnTime = r.PlannedReturnTime, DistanceKm = r.DistanceKm, Status = r.Status.ToString(),
+        HandoffWarmConfirmed = r.HandoffWarmConfirmed, HandoffKaltConfirmed = r.HandoffKaltConfirmed,
+        HandoffDessertConfirmed = r.HandoffDessertConfirmed, HandoffConfirmedAt = r.HandoffConfirmedAt,
         Stops = r.Stops.OrderBy(s => s.SequenceNumber).Select(s => new RouteStopDto
         {
             Id = s.Id, FacilityId = s.FacilityId, FacilityName = s.Facility?.Name ?? string.Empty, FacilityAddress = s.Facility?.Address ?? string.Empty, SequenceNumber = s.SequenceNumber,

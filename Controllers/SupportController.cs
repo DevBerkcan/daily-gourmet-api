@@ -1,4 +1,5 @@
 using DailyGourmet.Api.Handlers;
+using DailyGourmet.Api.Helpers;
 using DailyGourmet.Api.Models.DTOs;
 using DailyGourmet.Api.Models.DTOs.Support;
 using Microsoft.AspNetCore.Authorization;
@@ -31,6 +32,22 @@ public class SupportController(SupportTicketHandler handler) : ControllerBase
     [Authorize(Roles = "SUPER_ADMIN")]
     public async Task<ActionResult<ApiResponse<SupportTicketDto>>> UpdateStatus(Guid id, [FromBody] UpdateTicketStatusDto dto, CancellationToken ct) =>
         Ok(ApiResponse<SupportTicketDto>.Ok(await handler.UpdateStatusAsync(id, dto, ct)));
+
+    [HttpPost("{id:guid}/attachments")]
+    [RequestSizeLimit(10_000_000)]
+    public async Task<ActionResult<ApiResponse<SupportTicketAttachmentDto>>> AddAttachment(Guid id, IFormFile file, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0) throw new ValidationException("Keine Datei übermittelt.");
+        var result = await handler.AddAttachmentAsync(id, file, ct);
+        return Ok(ApiResponse<SupportTicketAttachmentDto>.Ok(result));
+    }
+
+    [HttpGet("{id:guid}/attachments/{attachmentId:guid}")]
+    public async Task<IActionResult> GetAttachment(Guid id, Guid attachmentId, CancellationToken ct)
+    {
+        var (content, contentType, fileName) = await handler.GetAttachmentAsync(id, attachmentId, ct);
+        return File(content, contentType, fileName);
+    }
 }
 
 [ApiController]

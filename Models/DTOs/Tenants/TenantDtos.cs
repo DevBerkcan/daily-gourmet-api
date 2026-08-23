@@ -56,11 +56,13 @@ public class TenantSettingsDto
 {
     public int DefaultOrderDeadlineOffsetDays { get; set; }
     public TimeSpan DefaultOrderDeadlineTime { get; set; }
+    public TimeSpan SameDayAdjustmentDeadlineTime { get; set; }
     public bool ExcludeWeekendsFromDeadline { get; set; }
     public bool RequireReviewBeforePublish { get; set; }
     public bool UnpublishRequiresNoOrders { get; set; }
     public string FacilityNumberPrefix { get; set; } = string.Empty;
     public string ArticleNumberPrefix { get; set; } = string.Empty;
+    public string RouteNumberPrefix { get; set; } = string.Empty;
     public List<TenantNotificationSettingDto> NotificationSettings { get; set; } = [];
 }
 

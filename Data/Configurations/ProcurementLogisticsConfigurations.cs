@@ -15,6 +15,8 @@ public class ProcurementListConfiguration : IEntityTypeConfiguration<Procurement
             .HasForeignKey(p => p.TenantId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(p => p.Location).WithMany()
             .HasForeignKey(p => p.LocationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(p => p.Supplier).WithMany()
+            .HasForeignKey(p => p.SupplierId).OnDelete(DeleteBehavior.Restrict);
     }
 }
 

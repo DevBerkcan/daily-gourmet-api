@@ -1,4 +1,5 @@
 using DailyGourmet.Api.Handlers;
+using DailyGourmet.Api.Helpers;
 using DailyGourmet.Api.Models.DTOs;
 using DailyGourmet.Api.Models.DTOs.Procurement;
 using Microsoft.AspNetCore.Authorization;
@@ -8,7 +9,7 @@ namespace DailyGourmet.Api.Controllers;
 
 [ApiController]
 [Route("api/procurement-lists")]
-[Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,KITCHEN_MANAGER")]
+[Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
 public class ProcurementListsController(ProcurementListHandler handler) : ControllerBase
 {
     [HttpGet]
@@ -37,9 +38,25 @@ public class ProcurementListsController(ProcurementListHandler handler) : Contro
         Ok(ApiResponse<ProcurementListDto>.Ok(await handler.UpdateStatusAsync(id, dto, ct)));
 
     [HttpGet("{id:guid}/export")]
-    public async Task<IActionResult> Export(Guid id, CancellationToken ct)
+    public async Task<IActionResult> Export(Guid id, [FromQuery] string format = "csv", CancellationToken ct = default)
     {
+        if (string.Equals(format, "pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            var pdfBytes = await handler.ExportPdfAsync(id, ct);
+            return File(pdfBytes, "application/pdf", $"einkauf-{id}.pdf");
+        }
         var bytes = await handler.ExportCsvAsync(id, ct);
         return File(bytes, "text/csv", $"einkauf-{id}.csv");
+    }
+
+    /// <summary>Token-authorized, no login required — see ProcurementListHandler.ApproveAsync for
+    /// why this deliberately bypasses [Authorize].</summary>
+    [HttpPost("{id:guid}/approve")]
+    [AllowAnonymous]
+    public async Task<ActionResult<ApiResponse<ProcurementListDto>>> Approve(Guid id, [FromQuery] string token, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(token)) throw new ValidationException("Kein Freigabe-Token angegeben.");
+        var result = await handler.ApproveAsync(id, token, ct);
+        return Ok(ApiResponse<ProcurementListDto>.Ok(result));
     }
 }

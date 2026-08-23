@@ -12,7 +12,7 @@ namespace DailyGourmet.Api.Controllers;
 public class DashboardController(DashboardHandler handler) : ControllerBase
 {
     [HttpGet("admin-summary")]
-    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,KITCHEN_MANAGER")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<AdminDashboardSummaryDto>>> AdminSummary(CancellationToken ct) =>
         Ok(ApiResponse<AdminDashboardSummaryDto>.Ok(await handler.AdminSummaryAsync(ct)));
 

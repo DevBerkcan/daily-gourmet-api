@@ -11,6 +11,15 @@ public class SupportTicketReplyDto
     public DateTime CreatedAt { get; set; }
 }
 
+public class SupportTicketAttachmentDto
+{
+    public Guid Id { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+    public long SizeBytes { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
 public class SupportTicketDto
 {
     public Guid Id { get; set; }
@@ -26,6 +35,7 @@ public class SupportTicketDto
     public string CreatedByUserName { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
     public List<SupportTicketReplyDto> Replies { get; set; } = [];
+    public List<SupportTicketAttachmentDto> Attachments { get; set; } = [];
 }
 
 public class CreateSupportTicketDto

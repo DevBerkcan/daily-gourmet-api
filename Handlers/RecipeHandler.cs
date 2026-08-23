@@ -4,11 +4,14 @@ using DailyGourmet.Api.Helpers;
 using DailyGourmet.Api.Models.DTOs;
 using DailyGourmet.Api.Models.DTOs.Recipes;
 using DailyGourmet.Api.Models.Entities;
+using DailyGourmet.Api.Models.Enums;
+using DailyGourmet.Api.Services;
+using DailyGourmet.Api.Services.Pdf;
 using Microsoft.EntityFrameworkCore;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContext)
+public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IPdfService pdfService)
 {
     private static IQueryable<Recipe> FullQuery(DailyGourmetDbContext db) => db.Recipes
         .Include(r => r.Category)
@@ -16,6 +19,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
         .Include(r => r.PrepSteps)
         .Include(r => r.Ingredients).ThenInclude(ri => ri.Ingredient).ThenInclude(i => i.Allergens).ThenInclude(a => a.Allergen)
         .Include(r => r.Ingredients).ThenInclude(ri => ri.Ingredient).ThenInclude(i => i.Additives)
+        .Include(r => r.Ingredients).ThenInclude(ri => ri.Ingredient).ThenInclude(i => i.SupplierPrices)
         .Include(r => r.AllergenOverrides)
         .Include(r => r.AdditiveOverrides)
         .Include(r => r.TargetGroups).ThenInclude(tg => tg.TargetAudienceGroupEntity);
@@ -52,6 +56,9 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             Difficulty = dto.Difficulty,
             Vegetarian = dto.Vegetarian,
             Vegan = dto.Vegan,
+            GlutenFree = dto.GlutenFree,
+            LactoseFree = dto.LactoseFree,
+            DgeCertified = dto.DgeCertified,
             ProductionNotes = dto.ProductionNotes,
             ImageUrl = dto.ImageUrl,
             CoreTemperatureC = dto.CoreTemperatureC,
@@ -83,6 +90,9 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
         recipe.Difficulty = dto.Difficulty;
         recipe.Vegetarian = dto.Vegetarian;
         recipe.Vegan = dto.Vegan;
+        recipe.GlutenFree = dto.GlutenFree;
+        recipe.LactoseFree = dto.LactoseFree;
+        recipe.DgeCertified = dto.DgeCertified;
         recipe.ProductionNotes = dto.ProductionNotes;
         recipe.ImageUrl = dto.ImageUrl;
         recipe.CoreTemperatureC = dto.CoreTemperatureC;
@@ -119,6 +129,9 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             Difficulty = source.Difficulty,
             Vegetarian = source.Vegetarian,
             Vegan = source.Vegan,
+            GlutenFree = source.GlutenFree,
+            LactoseFree = source.LactoseFree,
+            DgeCertified = source.DgeCertified,
             ProductionNotes = source.ProductionNotes,
             ImageUrl = source.ImageUrl,
             CoreTemperatureC = source.CoreTemperatureC,
@@ -167,6 +180,51 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
         };
     }
 
+    /// <summary>Scales a per-100g nutrition figure to a per-portion one — mirrors the frontend's
+    /// naehrwerteProPortion() in features/recipes/store.ts, kept in sync deliberately since both
+    /// read from the same per-100g Recipe.Nutrition source.</summary>
+    public static RecipeNutritionDto ScaleNutritionToPortion(RecipeNutritionDto n, decimal portionWeightG)
+    {
+        var factor = portionWeightG / 100m;
+        return new RecipeNutritionDto
+        {
+            Kcal = decimal.Round(n.Kcal * factor),
+            Kj = decimal.Round(n.Kj * factor),
+            FatG = decimal.Round(n.FatG * factor, 1),
+            SaturatedFatG = decimal.Round(n.SaturatedFatG * factor, 1),
+            CarbsG = decimal.Round(n.CarbsG * factor, 1),
+            SugarG = decimal.Round(n.SugarG * factor, 1),
+            FiberG = decimal.Round(n.FiberG * factor, 1),
+            ProteinG = decimal.Round(n.ProteinG * factor, 1),
+            SaltG = decimal.Round(n.SaltG * factor, 2),
+            AlcoholG = decimal.Round(n.AlcoholG * factor, 1),
+        };
+    }
+
+    public async Task<byte[]> RenderLabelAsync(Guid id, CancellationToken ct = default)
+    {
+        var recipe = await FullQuery(db).FirstOrDefaultAsync(r => r.Id == id, ct) ?? throw new NotFoundException(nameof(Recipe), id);
+        var dto = ToDto(recipe);
+
+        var (nutrition, nutritionLabel) = dto.Nutrition switch
+        {
+            { } n when recipe.PortionWeightG is { } weight => (ScaleNutritionToPortion(n, weight), "Nährwerte pro Portion"),
+            { } n => (n, "Nährwerte je 100 g (Portionsgewicht nicht hinterlegt)"),
+            null => (null, "Nährwerte pro Portion"),
+        };
+
+        var model = new RecipeLabelModel(
+            RecipeName: recipe.Name,
+            PortionWeightG: recipe.PortionWeightG,
+            Ingredients: recipe.Ingredients.Select(ri => $"{ri.Quantity:0.#} {ri.Unit} {ri.Ingredient.Name}").ToList(),
+            Allergens: dto.ResolvedAllergens,
+            Additives: dto.ResolvedAdditives,
+            Nutrition: nutrition,
+            NutritionLabel: nutritionLabel);
+
+        return pdfService.Render(new RecipeLabelDocument(model));
+    }
+
     private void ApplyChildren(Recipe recipe, SaveRecipeDto dto)
     {
         var stepNumber = 1;
@@ -178,6 +236,55 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
 
         foreach (var groupId in dto.TargetGroupIds.Distinct())
             db.RecipeTargetGroups.Add(new RecipeTargetGroup { RecipeId = recipe.Id, TargetAudienceGroupId = groupId });
+    }
+
+    /// <summary>Cheapest known price for an ingredient, and the unit it's priced in: the cheapest
+    /// supplier offer if one exists, else the ingredient's standard PurchasePrice (per PurchaseUnit,
+    /// converted to a per-BaseUnit price via ConversionFactor). Null when no price is known at all.</summary>
+    private static (decimal PricePerUnit, Unit Unit)? ResolveUnitPrice(Ingredient ingredient)
+    {
+        var cheapest = ingredient.SupplierPrices.OrderBy(p => p.Price).FirstOrDefault();
+        if (cheapest != null) return (cheapest.Price, cheapest.Unit);
+        if (ingredient.PurchasePrice is { } purchasePrice && ingredient.ConversionFactor > 0)
+            return (purchasePrice / ingredient.ConversionFactor, ingredient.BaseUnit);
+        return null;
+    }
+
+    /// <summary>Converts a quantity between units within the same family (g&lt;-&gt;kg, ml&lt;-&gt;l);
+    /// returns null for cross-family or Stueck conversions, since there's no general unit-conversion
+    /// system (e.g. density) anywhere in this codebase to fall back on.</summary>
+    private static decimal? ConvertQuantity(decimal quantity, Unit from, Unit to)
+    {
+        if (from == to) return quantity;
+        return (from, to) switch
+        {
+            (Unit.g, Unit.kg) => quantity / 1000m,
+            (Unit.kg, Unit.g) => quantity * 1000m,
+            (Unit.ml, Unit.l) => quantity / 1000m,
+            (Unit.l, Unit.ml) => quantity * 1000m,
+            _ => null,
+        };
+    }
+
+    /// <summary>Sum of each ingredient's quantity × cheapest known price, unit-normalized where
+    /// possible, divided by portion count. Ingredients that can't be priced (no price at all, or an
+    /// incompatible unit) are simply left out of the sum — this is a rough estimate, not an
+    /// authoritative cost (that lives in Einkauf).</summary>
+    public static decimal? ComputeEstimatedCostPerPortion(Recipe recipe)
+    {
+        if (recipe.StandardPortions <= 0) return null;
+        decimal total = 0;
+        var pricedAny = false;
+        foreach (var ri in recipe.Ingredients)
+        {
+            var priced = ResolveUnitPrice(ri.Ingredient);
+            if (priced is not { } p) continue;
+            var convertedQuantity = ConvertQuantity(ri.Quantity, ri.Unit, p.Unit);
+            if (convertedQuantity is not { } qty) continue;
+            total += qty * p.PricePerUnit;
+            pricedAny = true;
+        }
+        return pricedAny ? decimal.Round(total / recipe.StandardPortions, 2, MidpointRounding.AwayFromZero) : null;
     }
 
     private static RecipeDto ToDto(Recipe r)
@@ -206,6 +313,18 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             Difficulty = r.Difficulty.ToString(),
             Vegetarian = r.Vegetarian,
             Vegan = r.Vegan,
+            GlutenFree = r.GlutenFree,
+            LactoseFree = r.LactoseFree,
+            DgeCertified = r.DgeCertified,
+            EstimatedCostPerPortion = ComputeEstimatedCostPerPortion(r),
+            Nutrition = r.Nutrition is { } n
+                ? new RecipeNutritionDto
+                {
+                    Kcal = n.Kcal, Kj = n.Kj, FatG = n.FatG, SaturatedFatG = n.SaturatedFatG,
+                    CarbsG = n.CarbsG, SugarG = n.SugarG, FiberG = n.FiberG, ProteinG = n.ProteinG,
+                    SaltG = n.SaltG, AlcoholG = n.AlcoholG,
+                }
+                : null,
             ProductionNotes = r.ProductionNotes,
             ImageUrl = r.ImageUrl,
             CoreTemperatureC = r.CoreTemperatureC,

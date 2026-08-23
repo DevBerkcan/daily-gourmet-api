@@ -63,12 +63,40 @@ public class Ingredient : BaseEntity, ITenantScoped
     public bool Regional { get; set; }
     public bool Active { get; set; } = true;
 
+    /// <summary>Where this row came from. Set once at creation; never changed afterward.</summary>
+    public IngredientSource Source { get; set; } = IngredientSource.Manuell;
+    /// <summary>The Rezeptrechner's own item id — the sync match key. Null for manually-created
+    /// ingredients, so a sync run can never match (and thus never touch) them.</summary>
+    public string? ExternalRefId { get; set; }
+    /// <summary>Flips to true the moment a human edits this ingredient via UpdateAsync, regardless
+    /// of Source. A future sync skips any row with this set, so staff edits to an originally
+    /// imported ingredient are never silently overwritten.</summary>
+    public bool IsManuallyEdited { get; set; }
+    public DateTime? LastSyncedAt { get; set; }
+
     // Nutrition per 100 g/ml — EF owned type.
     public IngredientNutrition Nutrition { get; set; } = new();
 
     public ICollection<IngredientAllergen> Allergens { get; set; } = new List<IngredientAllergen>();
     public ICollection<IngredientAdditive> Additives { get; set; } = new List<IngredientAdditive>();
+    public ICollection<IngredientSupplierPrice> SupplierPrices { get; set; } = new List<IngredientSupplierPrice>();
     public ICollection<RecipeIngredient> UsedInRecipes { get; set; } = new List<RecipeIngredient>();
+}
+
+/// <summary>One supplier's offer for one ingredient. An ingredient can hold several of these (one
+/// per supplier); the cheapest is resolved at read time (see IngredientHandler/RecipeHandler), not
+/// stored, so it never goes stale when prices change.</summary>
+public class IngredientSupplierPrice : BaseEntity
+{
+    public Guid IngredientId { get; set; }
+    public Ingredient Ingredient { get; set; } = null!;
+    public Guid SupplierId { get; set; }
+    public Supplier Supplier { get; set; } = null!;
+
+    public string SupplierArticleNumber { get; set; } = string.Empty;
+    public decimal Price { get; set; }
+    public Unit Unit { get; set; }
+    public string? AvailabilityNote { get; set; }
 }
 
 public class IngredientNutrition
@@ -118,6 +146,12 @@ public class Recipe : BaseEntity, ITenantScoped
     public Difficulty Difficulty { get; set; }
     public bool Vegetarian { get; set; }
     public bool Vegan { get; set; }
+    public bool GlutenFree { get; set; }
+    public bool LactoseFree { get; set; }
+    /// <summary>Meets the DGE ("Deutsche Gesellschaft für Ernährung") certification the tenant
+    /// holds — drives a badge on the recipe and, at the meal-plan level, a computed check that
+    /// every recipe in a published week qualifies.</summary>
+    public bool DgeCertified { get; set; }
     public string? ProductionNotes { get; set; }
     public string? ImageUrl { get; set; }
     public decimal? CoreTemperatureC { get; set; }

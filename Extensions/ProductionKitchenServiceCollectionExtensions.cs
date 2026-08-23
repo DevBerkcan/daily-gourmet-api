@@ -7,6 +7,7 @@ public static class ProductionKitchenServiceCollectionExtensions
     public static IServiceCollection AddProductionKitchenModule(this IServiceCollection services)
     {
         services.AddScoped<ProductionPlanHandler>();
+        services.AddScoped<ProductionPlanPrintHandler>();
         services.AddScoped<DeviationHandler>();
         services.AddScoped<QualityControlHandler>();
         services.AddScoped<StorageLocationHandler>();

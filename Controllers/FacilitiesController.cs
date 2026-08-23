@@ -11,7 +11,7 @@ namespace DailyGourmet.Api.Controllers;
 [ApiController]
 [Route("api/facilities")]
 [Authorize]
-public class FacilitiesController(FacilityHandler handler, ITenantContext tenantContext) : ControllerBase
+public class FacilitiesController(FacilityHandler handler, FacilityClosureHandler closureHandler, ITenantContext tenantContext) : ControllerBase
 {
     [HttpGet]
     [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
@@ -46,5 +46,46 @@ public class FacilitiesController(FacilityHandler handler, ITenantContext tenant
     {
         var result = await handler.UpdateAsync(id, dto, ct);
         return Ok(ApiResponse<FacilityDto>.Ok(result));
+    }
+
+    [HttpGet("{id:guid}/closures")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,FACILITY_ADMIN,FACILITY_USER")]
+    public async Task<ActionResult<ApiResponse<List<FacilityClosureDto>>>> ListClosures(Guid id, CancellationToken ct) =>
+        Ok(ApiResponse<List<FacilityClosureDto>>.Ok(await closureHandler.ListAsync(id, ct)));
+
+    [HttpPost("{id:guid}/closures")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,FACILITY_ADMIN,FACILITY_USER")]
+    public async Task<ActionResult<ApiResponse<FacilityClosureDto>>> AddClosure(Guid id, [FromBody] SaveFacilityClosureDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<FacilityClosureDto>.Ok(await closureHandler.CreateAsync(id, dto, ct)));
+
+    [HttpDelete("{id:guid}/closures/{closureId:guid}")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,FACILITY_ADMIN,FACILITY_USER")]
+    public async Task<ActionResult<ApiResponse>> DeleteClosure(Guid id, Guid closureId, CancellationToken ct)
+    {
+        await closureHandler.DeleteAsync(id, closureId, ct);
+        return Ok(ApiResponse.Ok());
+    }
+}
+
+[ApiController]
+[Route("api/portal/facility-closures")]
+[Authorize(Roles = "FACILITY_ADMIN,FACILITY_USER")]
+public class PortalFacilityClosuresController(FacilityClosureHandler closureHandler, ITenantContext tenantContext) : ControllerBase
+{
+    private Guid OwnFacilityId => tenantContext.FacilityId ?? throw new ForbiddenException("Kein Einrichtungskontext vorhanden.");
+
+    [HttpGet]
+    public async Task<ActionResult<ApiResponse<List<FacilityClosureDto>>>> List(CancellationToken ct) =>
+        Ok(ApiResponse<List<FacilityClosureDto>>.Ok(await closureHandler.ListAsync(OwnFacilityId, ct)));
+
+    [HttpPost]
+    public async Task<ActionResult<ApiResponse<FacilityClosureDto>>> Add([FromBody] SaveFacilityClosureDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<FacilityClosureDto>.Ok(await closureHandler.CreateAsync(OwnFacilityId, dto, ct)));
+
+    [HttpDelete("{closureId:guid}")]
+    public async Task<ActionResult<ApiResponse>> Delete(Guid closureId, CancellationToken ct)
+    {
+        await closureHandler.DeleteAsync(OwnFacilityId, closureId, ct);
+        return Ok(ApiResponse.Ok());
     }
 }

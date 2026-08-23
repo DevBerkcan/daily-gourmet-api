@@ -20,7 +20,7 @@ public class QualityControlsController(QualityControlHandler handler) : Controll
     }
 
     [HttpPost]
-    [Authorize(Roles = "KITCHEN_MANAGER,KITCHEN_STAFF,TENANT_OWNER,TENANT_ADMIN")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<QualityControlDto>>> Create([FromBody] CreateQualityControlDto dto, CancellationToken ct) =>
         Ok(ApiResponse<QualityControlDto>.Ok(await handler.CreateAsync(dto, ct)));
 }

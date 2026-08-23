@@ -10,6 +10,7 @@ public class MealPlanConfiguration : IEntityTypeConfiguration<MealPlan>
     {
         b.Property(m => m.Status).HasConversion<string>().HasMaxLength(20);
         b.HasIndex(m => new { m.TenantId, m.Year, m.CalendarWeek }).IsUnique();
+        b.HasIndex(m => new { m.TenantId, m.TemplateSlot }).IsUnique().HasFilter("[IsTemplate] = 1");
 
         b.HasOne(m => m.Tenant).WithMany()
             .HasForeignKey(m => m.TenantId).OnDelete(DeleteBehavior.Restrict);
@@ -56,6 +57,7 @@ public class MealPlanItemConfiguration : IEntityTypeConfiguration<MealPlanItem>
 {
     public void Configure(EntityTypeBuilder<MealPlanItem> b)
     {
+        b.Property(i => i.DietLine).HasConversion<string>().HasMaxLength(30);
         b.HasOne(i => i.MealPlanDay).WithMany(d => d.Items)
             .HasForeignKey(i => i.MealPlanDayId).OnDelete(DeleteBehavior.Cascade);
         b.HasOne(i => i.Recipe).WithMany()

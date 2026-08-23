@@ -13,17 +13,23 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
 {
     private static readonly OrderStatus[] BindingStatuses = [OrderStatus.SUBMITTED, OrderStatus.CONFIRMED, OrderStatus.LOCKED];
 
+    private static readonly Dictionary<string, string> WeekdayAbbreviation = new()
+    {
+        ["Montag"] = "Mo", ["Dienstag"] = "Di", ["Mittwoch"] = "Mi", ["Donnerstag"] = "Do", ["Freitag"] = "Fr",
+    };
+
     private static IQueryable<Order> FullQuery(DailyGourmetDbContext db) => db.Orders
         .Include(o => o.Facility)
         .Include(o => o.MealPlan)
         .Include(o => o.Items).ThenInclude(i => i.Recipe);
 
-    public async Task<PagedResult<OrderDto>> ListAsync(Guid? facilityId, Guid? mealPlanId, string? status, int page, int pageSize, CancellationToken ct = default)
+    public async Task<PagedResult<OrderDto>> ListAsync(Guid? facilityId, Guid? mealPlanId, int? calendarWeek, string? status, int page, int pageSize, CancellationToken ct = default)
     {
         var query = FullQuery(db).AsQueryable();
         if (tenantContext.FacilityId is { } own) query = query.Where(o => o.FacilityId == own);
         else if (facilityId is { } fid) query = query.Where(o => o.FacilityId == fid);
         if (mealPlanId is { } mid) query = query.Where(o => o.MealPlanId == mid);
+        if (calendarWeek is { } cw) query = query.Where(o => o.MealPlan.CalendarWeek == cw);
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<OrderStatus>(status, out var s)) query = query.Where(o => o.Status == s);
 
         var total = await query.CountAsync(ct);
@@ -48,6 +54,9 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
 
         if (dto.Submit && DateTime.UtcNow > deadline)
             throw new ConflictException("Die Bestellfrist ist abgelaufen.");
+
+        if (dto.Submit)
+            await EnsureEverySlotDecidedAsync(facilityId, dto.MealPlanId, dto.Items, ct);
 
         if (order is null)
         {
@@ -162,6 +171,67 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
                 deadlineDate = deadlineDate.AddDays(-1);
 
         return deadlineDate.ToDateTime(TimeOnly.FromTimeSpan(deadlineTime), DateTimeKind.Utc);
+    }
+
+    /// <summary>Blocks submit unless every (date, recipe) slot the published plan offers on this
+    /// facility's active weekdays has a matching item in dto.Items — including an explicit
+    /// Portions=0 row, which counts as "decided" (see OrderItem's Wunschgericht convention: a
+    /// missing row means "forgot to fill in," a present row with 0 means "confirmed none needed").
+    /// Names the first missing slot so the frontend can show a specific, non-generic message.</summary>
+    private async Task EnsureEverySlotDecidedAsync(Guid facilityId, Guid mealPlanId, List<SaveOrderItemDto> items, CancellationToken ct)
+    {
+        var mealPlan = await db.MealPlans.Include(m => m.Days).ThenInclude(d => d.Items).ThenInclude(i => i.Recipe)
+            .FirstOrDefaultAsync(m => m.Id == mealPlanId, ct) ?? throw new NotFoundException(nameof(MealPlan), mealPlanId);
+        var facility = await db.Facilities.FirstOrDefaultAsync(f => f.Id == facilityId, ct) ?? throw new NotFoundException(nameof(Facility), facilityId);
+        var activeAbbreviations = facility.ActiveWeekdays.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+
+        var expected = mealPlan.Days
+            .Where(d => activeAbbreviations.Contains(WeekdayAbbreviation.GetValueOrDefault(d.Weekday, d.Weekday)))
+            .SelectMany(d => d.Items.Select(i => new { d.Date, i.RecipeId, RecipeName = i.Recipe?.Name ?? "Gericht" }))
+            .ToList();
+        var provided = items.Select(i => (i.Date, i.RecipeId)).ToHashSet();
+
+        var missing = expected.FirstOrDefault(e => !provided.Contains((e.Date, e.RecipeId)));
+        if (missing is not null)
+            throw new ValidationException($"Für {missing.Date:dd.MM.yyyy} fehlt eine Angabe zu „{missing.RecipeName}“ — bitte 0 eintragen, falls nicht benötigt.");
+    }
+
+    public async Task<OrderDto> AdjustSameDayAsync(Guid id, AdjustOrderDto dto, CancellationToken ct = default)
+    {
+        var order = await db.Orders.Include(o => o.Facility).Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == id, ct)
+            ?? throw new NotFoundException(nameof(Order), id);
+        EnsureFacilityAccess(order.FacilityId);
+        if (order.Status is not (OrderStatus.SUBMITTED or OrderStatus.CONFIRMED))
+            throw new ConflictException("Nur abgesendete oder bestätigte Bestellungen können am Liefertag angepasst werden.");
+
+        var settings = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == order.TenantId, ct);
+        var cutoffTime = order.Facility.SameDayAdjustmentDeadlineTime ?? settings?.SameDayAdjustmentDeadlineTime ?? new TimeSpan(9, 0, 0);
+
+        foreach (var change in dto.Items)
+        {
+            var item = order.Items.FirstOrDefault(i => i.Id == change.ItemId)
+                ?? throw new ValidationException("Am Liefertag können nur bestehende Positionen reduziert werden, keine neuen hinzugefügt werden.");
+            if (change.Portions > item.Portions)
+                throw new ValidationException($"Portionen für '{item.RecipeId}' können am Liefertag nur reduziert, nicht erhöht werden.");
+
+            var cutoff = item.Date.ToDateTime(TimeOnly.FromTimeSpan(cutoffTime), DateTimeKind.Utc);
+            if (DateTime.UtcNow > cutoff)
+                throw new ConflictException($"Die Frist für Anpassungen am {item.Date:dd.MM.yyyy} ist abgelaufen.");
+
+            if (change.Portions == item.Portions) continue;
+            item.Portions = change.Portions;
+            item.Note = string.IsNullOrWhiteSpace(item.Note) ? change.Note : $"{item.Note} · {change.Note}";
+        }
+
+        order.UpdatedAt = DateTime.UtcNow;
+        db.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(), TenantId = tenantContext.TenantId, UserId = tenantContext.UserId,
+            Action = "Portionen am Liefertag angepasst", Entity = "Order", EntityId = order.Id.ToString(),
+            Reason = string.Join("; ", dto.Items.Select(i => i.Note)), CreatedAtUtc = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync(ct);
+        return await GetByIdAsync(id, ct);
     }
 
     private static OrderDto ToDto(Order o) => new()

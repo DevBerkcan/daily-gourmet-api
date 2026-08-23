@@ -28,7 +28,7 @@ public class RecipesController(RecipeHandler handler) : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,KITCHEN_MANAGER")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<RecipeDto>>> Create([FromBody] SaveRecipeDto dto, CancellationToken ct)
     {
         var result = await handler.CreateAsync(dto, ct);
@@ -36,7 +36,7 @@ public class RecipesController(RecipeHandler handler) : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,KITCHEN_MANAGER")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<RecipeDto>>> Update(Guid id, [FromBody] SaveRecipeDto dto, CancellationToken ct)
     {
         var result = await handler.UpdateAsync(id, dto, ct);
@@ -44,7 +44,7 @@ public class RecipesController(RecipeHandler handler) : ControllerBase
     }
 
     [HttpPost("{id:guid}/duplicate")]
-    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,KITCHEN_MANAGER")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<RecipeDto>>> Duplicate(Guid id, CancellationToken ct)
     {
         var result = await handler.DuplicateAsync(id, ct);
@@ -52,7 +52,7 @@ public class RecipesController(RecipeHandler handler) : ControllerBase
     }
 
     [HttpPost("{id:guid}/archive")]
-    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,KITCHEN_MANAGER")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse>> Archive(Guid id, CancellationToken ct)
     {
         await handler.ArchiveAsync(id, ct);
@@ -64,5 +64,12 @@ public class RecipesController(RecipeHandler handler) : ControllerBase
     {
         var result = await handler.ScaleAsync(id, portions, ct);
         return Ok(ApiResponse<RecipeScaleResultDto>.Ok(result));
+    }
+
+    [HttpGet("{id:guid}/label")]
+    public async Task<IActionResult> Label(Guid id, CancellationToken ct)
+    {
+        var bytes = await handler.RenderLabelAsync(id, ct);
+        return File(bytes, "application/pdf", $"etikett-{id}.pdf");
     }
 }

@@ -12,7 +12,7 @@ namespace DailyGourmet.Api.Controllers;
 public class DriversController(DriverHandler handler) : ControllerBase
 {
     [HttpGet]
-    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,KITCHEN_MANAGER,KITCHEN_STAFF,DRIVER")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,DRIVER")]
     public async Task<ActionResult<ApiResponse<PagedResult<DriverDto>>>> List([FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default) =>
         Ok(ApiResponse<PagedResult<DriverDto>>.Ok(await handler.ListAsync(page, pageSize, ct)));
 

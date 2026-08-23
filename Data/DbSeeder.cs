@@ -155,8 +155,6 @@ public static class DbSeeder
             (G("U1"), "Berk-Can Aydin", "berkcan@gentle-webdesign.com", Role.SUPER_ADMIN, UserStatus.AKTIV, null),
             (G("U2"), "Miriam Hoffmann", "miriam.hoffmann@daily-gourmet.de", Role.TENANT_OWNER, UserStatus.AKTIV, null),
             (G("U3"), "Jonas Weber", "jonas.weber@daily-gourmet.de", Role.TENANT_ADMIN, UserStatus.AKTIV, null),
-            (G("U4"), "Petra Salomon", "petra.salomon@daily-gourmet.de", Role.KITCHEN_MANAGER, UserStatus.AKTIV, null),
-            (G("U5"), "Ali Yildiz", "ali.yildiz@daily-gourmet.de", Role.KITCHEN_STAFF, UserStatus.AKTIV, null),
             (G("U6"), "Claudia Winter", "claudia.winter@musterschule-nord.example.de", Role.FACILITY_ADMIN, UserStatus.AKTIV, facilityData[0].Id),
             (G("U7"), "Sven Fischer", "sven.fischer@musterschule-nord.example.de", Role.FACILITY_USER, UserStatus.EINGELADEN, facilityData[0].Id),
             (G("U8"), "Lena Roth", "lena.roth@daily-gourmet.de", Role.READ_ONLY, UserStatus.DEAKTIVIERT, null),

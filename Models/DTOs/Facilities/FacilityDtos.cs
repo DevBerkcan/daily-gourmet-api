@@ -17,6 +17,7 @@ public class FacilityDto
     public decimal PortionPrice { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? Notes { get; set; }
+    public string? RouteNumber { get; set; }
 }
 
 public class CreateFacilityDto
@@ -46,10 +47,30 @@ public class CreateFacilityDto
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
+
+    [MaxLength(20)]
+    public string? RouteNumber { get; set; }
 }
 
 public class UpdateFacilityDto : CreateFacilityDto
 {
     [Required]
     public string Status { get; set; } = "AKTIV";
+}
+
+public class FacilityClosureDto
+{
+    public Guid Id { get; set; }
+    public Guid FacilityId { get; set; }
+    public DateOnly StartDate { get; set; }
+    public DateOnly EndDate { get; set; }
+    public string? Note { get; set; }
+    public bool AddedByAdmin { get; set; }
+}
+
+public class SaveFacilityClosureDto
+{
+    [Required] public DateOnly StartDate { get; set; }
+    [Required] public DateOnly EndDate { get; set; }
+    [MaxLength(500)] public string? Note { get; set; }
 }

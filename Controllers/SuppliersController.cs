@@ -40,4 +40,15 @@ public class SuppliersController(SupplierHandler handler) : ControllerBase
         var result = await handler.UpdateAsync(id, dto, ct);
         return Ok(ApiResponse<SupplierDto>.Ok(result));
     }
+
+    [HttpPost("{id:guid}/price-import")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    [RequestSizeLimit(10_000_000)]
+    public async Task<ActionResult<ApiResponse<ImportResultDto>>> ImportPriceList(Guid id, IFormFile file, CancellationToken ct)
+    {
+        if (file.Length == 0) throw new DailyGourmet.Api.Helpers.ValidationException("Keine Datei übermittelt.");
+        await using var stream = file.OpenReadStream();
+        var result = await handler.ImportPriceListAsync(id, stream, file.FileName, ct);
+        return Ok(ApiResponse<ImportResultDto>.Ok(result));
+    }
 }

@@ -21,12 +21,12 @@ public class DeviationsController(DeviationHandler handler) : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "KITCHEN_MANAGER,KITCHEN_STAFF,TENANT_OWNER,TENANT_ADMIN")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<DeviationDto>>> Create([FromBody] CreateDeviationDto dto, CancellationToken ct) =>
         Ok(ApiResponse<DeviationDto>.Ok(await handler.CreateAsync(dto, ct)));
 
     [HttpPost("{id:guid}/resolve")]
-    [Authorize(Roles = "KITCHEN_MANAGER,TENANT_OWNER,TENANT_ADMIN")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<DeviationDto>>> Resolve(Guid id, CancellationToken ct) =>
         Ok(ApiResponse<DeviationDto>.Ok(await handler.ResolveAsync(id, ct)));
 }

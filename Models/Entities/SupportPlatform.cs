@@ -19,6 +19,22 @@ public class SupportTicket : BaseEntity, ITenantScoped
     public SupportStatus Status { get; set; } = SupportStatus.OFFEN;
 
     public ICollection<SupportTicketReply> Replies { get; set; } = new List<SupportTicketReply>();
+    public ICollection<SupportTicketAttachment> Attachments { get; set; } = new List<SupportTicketAttachment>();
+}
+
+/// <summary>A file (e.g. a screenshot) attached to a ticket — see Services/IFileStorageService for
+/// how StorageKey resolves to actual bytes.</summary>
+public class SupportTicketAttachment : BaseEntity
+{
+    public Guid TicketId { get; set; }
+    public SupportTicket Ticket { get; set; } = null!;
+    public Guid UploadedByUserId { get; set; }
+    public User UploadedByUser { get; set; } = null!;
+
+    public string FileName { get; set; } = null!;
+    public string ContentType { get; set; } = null!;
+    public long SizeBytes { get; set; }
+    public string StorageKey { get; set; } = null!;
 }
 
 public class SupportTicketReply : BaseEntity

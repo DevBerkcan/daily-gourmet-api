@@ -66,6 +66,8 @@ public class TenantHandler(DailyGourmetDbContext db, ITenantSettingsRepository s
         settings.UnpublishRequiresNoOrders = dto.UnpublishRequiresNoOrders;
         settings.FacilityNumberPrefix = dto.FacilityNumberPrefix;
         settings.ArticleNumberPrefix = dto.ArticleNumberPrefix;
+        settings.RouteNumberPrefix = dto.RouteNumberPrefix;
+        settings.SameDayAdjustmentDeadlineTime = dto.SameDayAdjustmentDeadlineTime;
 
         var existing = await db.TenantNotificationSettings.Where(n => n.TenantId == CurrentTenantId).ToListAsync(ct);
         foreach (var item in dto.NotificationSettings)
@@ -89,8 +91,10 @@ public class TenantHandler(DailyGourmetDbContext db, ITenantSettingsRepository s
     private static TenantSettingsDto ToSettingsDto(TenantSettings s, List<TenantNotificationSetting> notifications) => new()
     {
         DefaultOrderDeadlineOffsetDays = s.DefaultOrderDeadlineOffsetDays, DefaultOrderDeadlineTime = s.DefaultOrderDeadlineTime,
+        SameDayAdjustmentDeadlineTime = s.SameDayAdjustmentDeadlineTime,
         ExcludeWeekendsFromDeadline = s.ExcludeWeekendsFromDeadline, RequireReviewBeforePublish = s.RequireReviewBeforePublish,
         UnpublishRequiresNoOrders = s.UnpublishRequiresNoOrders, FacilityNumberPrefix = s.FacilityNumberPrefix, ArticleNumberPrefix = s.ArticleNumberPrefix,
+        RouteNumberPrefix = s.RouteNumberPrefix,
         NotificationSettings = notifications.Select(n => new TenantNotificationSettingDto { EventKey = n.EventKey, Enabled = n.Enabled }).ToList(),
     };
 }

@@ -122,8 +122,20 @@ namespace DailyGourmet.Api.Migrations
                         .HasPrecision(6, 1)
                         .HasColumnType("decimal(6,1)");
 
-                    b.Property<Guid>("DriverId")
+                    b.Property<Guid?>("DriverId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("HandoffConfirmedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("HandoffDessertConfirmed")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("HandoffKaltConfirmed")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("HandoffWarmConfirmed")
+                        .HasColumnType("bit");
 
                     b.Property<Guid?>("LocationId")
                         .HasColumnType("uniqueidentifier");
@@ -332,6 +344,13 @@ namespace DailyGourmet.Api.Migrations
                         .HasPrecision(10, 2)
                         .HasColumnType("decimal(10,2)");
 
+                    b.Property<string>("RouteNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<TimeSpan?>("SameDayAdjustmentDeadlineTime")
+                        .HasColumnType("time");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -351,6 +370,48 @@ namespace DailyGourmet.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("Facilities");
+                });
+
+            modelBuilder.Entity("DailyGourmet.Api.Models.Entities.FacilityClosure", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly>("EndDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("FacilityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("FacilityId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("FacilityClosures");
                 });
 
             modelBuilder.Entity("DailyGourmet.Api.Models.Entities.FeatureFlag", b =>
@@ -422,6 +483,15 @@ namespace DailyGourmet.Api.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("ExternalRefId")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsManuallyEdited")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("LastSyncedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -438,6 +508,9 @@ namespace DailyGourmet.Api.Migrations
 
                     b.Property<bool>("Regional")
                         .HasColumnType("bit");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
 
                     b.Property<Guid?>("SupplierId")
                         .HasColumnType("uniqueidentifier");
@@ -538,6 +611,46 @@ namespace DailyGourmet.Api.Migrations
                     b.ToTable("IngredientCategories");
                 });
 
+            modelBuilder.Entity("DailyGourmet.Api.Models.Entities.IngredientSupplierPrice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AvailabilityNote")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("IngredientId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Price")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("SupplierArticleNumber")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Unit")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IngredientId");
+
+                    b.HasIndex("SupplierId");
+
+                    b.ToTable("IngredientSupplierPrices");
+                });
+
             modelBuilder.Entity("DailyGourmet.Api.Models.Entities.Location", b =>
                 {
                     b.Property<Guid>("Id")
@@ -595,10 +708,16 @@ namespace DailyGourmet.Api.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<bool>("IsTemplate")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("TemplateSlot")
+                        .HasColumnType("int");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -610,6 +729,10 @@ namespace DailyGourmet.Api.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "TemplateSlot")
+                        .IsUnique()
+                        .HasFilter("[IsTemplate] = 1");
 
                     b.HasIndex("TenantId", "Year", "CalendarWeek")
                         .IsUnique();
@@ -674,6 +797,11 @@ namespace DailyGourmet.Api.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("DietLine")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
 
                     b.Property<Guid>("MealPlanDayId")
                         .HasColumnType("uniqueidentifier");
@@ -841,6 +969,12 @@ namespace DailyGourmet.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ApprovalToken")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ApprovalTokenExpiresAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<int>("CalendarWeek")
                         .HasColumnType("int");
 
@@ -860,6 +994,9 @@ namespace DailyGourmet.Api.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<Guid?>("SupplierId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
@@ -869,6 +1006,8 @@ namespace DailyGourmet.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("LocationId");
+
+                    b.HasIndex("SupplierId");
 
                     b.HasIndex("TenantId");
 
@@ -1150,14 +1289,23 @@ namespace DailyGourmet.Api.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
 
+                    b.Property<bool>("DgeCertified")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Difficulty")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<bool>("GlutenFree")
+                        .HasColumnType("bit");
+
                     b.Property<string>("ImageUrl")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("LactoseFree")
+                        .HasColumnType("bit");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -1711,6 +1859,51 @@ namespace DailyGourmet.Api.Migrations
                     b.ToTable("SupportTickets");
                 });
 
+            modelBuilder.Entity("DailyGourmet.Api.Models.Entities.SupportTicketAttachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("TicketId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("UploadedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TicketId");
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.ToTable("SupportTicketAttachments");
+                });
+
             modelBuilder.Entity("DailyGourmet.Api.Models.Entities.SupportTicketReply", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1933,6 +2126,13 @@ namespace DailyGourmet.Api.Migrations
                     b.Property<bool>("RequireReviewBeforePublish")
                         .HasColumnType("bit");
 
+                    b.Property<string>("RouteNumberPrefix")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<TimeSpan>("SameDayAdjustmentDeadlineTime")
+                        .HasColumnType("time");
+
                     b.Property<bool>("UnpublishRequiresNoOrders")
                         .HasColumnType("bit");
 
@@ -2033,8 +2233,7 @@ namespace DailyGourmet.Api.Migrations
                     b.HasOne("DailyGourmet.Api.Models.Entities.Driver", "Driver")
                         .WithMany("Routes")
                         .HasForeignKey("DriverId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("DailyGourmet.Api.Models.Entities.Location", "Location")
                         .WithMany()
@@ -2121,6 +2320,32 @@ namespace DailyGourmet.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Location");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("DailyGourmet.Api.Models.Entities.FacilityClosure", b =>
+                {
+                    b.HasOne("DailyGourmet.Api.Models.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("DailyGourmet.Api.Models.Entities.Facility", "Facility")
+                        .WithMany("Closures")
+                        .HasForeignKey("FacilityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("DailyGourmet.Api.Models.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Facility");
 
                     b.Navigation("Tenant");
                 });
@@ -2234,6 +2459,25 @@ namespace DailyGourmet.Api.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("DefaultStorageLocation");
+                });
+
+            modelBuilder.Entity("DailyGourmet.Api.Models.Entities.IngredientSupplierPrice", b =>
+                {
+                    b.HasOne("DailyGourmet.Api.Models.Entities.Ingredient", "Ingredient")
+                        .WithMany("SupplierPrices")
+                        .HasForeignKey("IngredientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("DailyGourmet.Api.Models.Entities.Supplier", "Supplier")
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Ingredient");
+
+                    b.Navigation("Supplier");
                 });
 
             modelBuilder.Entity("DailyGourmet.Api.Models.Entities.Location", b =>
@@ -2398,6 +2642,11 @@ namespace DailyGourmet.Api.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("DailyGourmet.Api.Models.Entities.Supplier", "Supplier")
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("DailyGourmet.Api.Models.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -2405,6 +2654,8 @@ namespace DailyGourmet.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Location");
+
+                    b.Navigation("Supplier");
 
                     b.Navigation("Tenant");
                 });
@@ -2787,6 +3038,25 @@ namespace DailyGourmet.Api.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("DailyGourmet.Api.Models.Entities.SupportTicketAttachment", b =>
+                {
+                    b.HasOne("DailyGourmet.Api.Models.Entities.SupportTicket", "Ticket")
+                        .WithMany("Attachments")
+                        .HasForeignKey("TicketId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("DailyGourmet.Api.Models.Entities.User", "UploadedByUser")
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Ticket");
+
+                    b.Navigation("UploadedByUser");
+                });
+
             modelBuilder.Entity("DailyGourmet.Api.Models.Entities.SupportTicketReply", b =>
                 {
                     b.HasOne("DailyGourmet.Api.Models.Entities.User", "AuthorUser")
@@ -2887,6 +3157,8 @@ namespace DailyGourmet.Api.Migrations
 
             modelBuilder.Entity("DailyGourmet.Api.Models.Entities.Facility", b =>
                 {
+                    b.Navigation("Closures");
+
                     b.Navigation("Orders");
 
                     b.Navigation("Users");
@@ -2902,6 +3174,8 @@ namespace DailyGourmet.Api.Migrations
                     b.Navigation("Additives");
 
                     b.Navigation("Allergens");
+
+                    b.Navigation("SupplierPrices");
 
                     b.Navigation("UsedInRecipes");
                 });
@@ -2973,6 +3247,8 @@ namespace DailyGourmet.Api.Migrations
 
             modelBuilder.Entity("DailyGourmet.Api.Models.Entities.SupportTicket", b =>
                 {
+                    b.Navigation("Attachments");
+
                     b.Navigation("Replies");
                 });
 

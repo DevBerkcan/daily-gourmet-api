@@ -33,10 +33,26 @@ public class FacilityConfiguration : IEntityTypeConfiguration<Facility>
         b.Property(f => f.PortionPrice).HasPrecision(10, 2);
         b.Property(f => f.Status).HasConversion<string>().HasMaxLength(20);
         b.Property(f => f.Notes).HasMaxLength(1000);
+        b.Property(f => f.RouteNumber).HasMaxLength(20);
 
         b.HasOne(f => f.Tenant).WithMany()
             .HasForeignKey(f => f.TenantId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(f => f.Location).WithMany(l => l.Facilities)
             .HasForeignKey(f => f.LocationId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class FacilityClosureConfiguration : IEntityTypeConfiguration<FacilityClosure>
+{
+    public void Configure(EntityTypeBuilder<FacilityClosure> b)
+    {
+        b.Property(c => c.Note).HasMaxLength(500);
+
+        b.HasOne(c => c.Tenant).WithMany()
+            .HasForeignKey(c => c.TenantId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(c => c.Facility).WithMany(f => f.Closures)
+            .HasForeignKey(c => c.FacilityId).OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(c => c.CreatedByUser).WithMany()
+            .HasForeignKey(c => c.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
     }
 }

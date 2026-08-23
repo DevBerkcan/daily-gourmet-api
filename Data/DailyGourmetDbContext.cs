@@ -27,6 +27,7 @@ public class DailyGourmetDbContext : DbContext
     // Locations & facilities
     public DbSet<Location> Locations => Set<Location>();
     public DbSet<Facility> Facilities => Set<Facility>();
+    public DbSet<FacilityClosure> FacilityClosures => Set<FacilityClosure>();
 
     // Recipes & ingredients
     public DbSet<RecipeCategory> RecipeCategories => Set<RecipeCategory>();
@@ -37,6 +38,7 @@ public class DailyGourmetDbContext : DbContext
     public DbSet<Ingredient> Ingredients => Set<Ingredient>();
     public DbSet<IngredientAllergen> IngredientAllergens => Set<IngredientAllergen>();
     public DbSet<IngredientAdditive> IngredientAdditives => Set<IngredientAdditive>();
+    public DbSet<IngredientSupplierPrice> IngredientSupplierPrices => Set<IngredientSupplierPrice>();
     public DbSet<Recipe> Recipes => Set<Recipe>();
     public DbSet<RecipePrepStep> RecipePrepSteps => Set<RecipePrepStep>();
     public DbSet<RecipeIngredient> RecipeIngredients => Set<RecipeIngredient>();
@@ -72,6 +74,7 @@ public class DailyGourmetDbContext : DbContext
     // Support & platform
     public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
     public DbSet<SupportTicketReply> SupportTicketReplies => Set<SupportTicketReply>();
+    public DbSet<SupportTicketAttachment> SupportTicketAttachments => Set<SupportTicketAttachment>();
     public DbSet<SupportSession> SupportSessions => Set<SupportSession>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Notification> Notifications => Set<Notification>();
@@ -107,6 +110,7 @@ public class DailyGourmetDbContext : DbContext
         // would leak cross-tenant rows. Cascaded through the required parent navigation.
         modelBuilder.Entity<IngredientAllergen>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.Ingredient.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<IngredientAdditive>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.Ingredient.TenantId == _tenantContext.TenantId);
+        modelBuilder.Entity<IngredientSupplierPrice>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.Ingredient.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<RecipeIngredient>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.Recipe.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<RecipePrepStep>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.Recipe.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<RecipeAllergenOverride>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.Recipe.TenantId == _tenantContext.TenantId);
@@ -124,6 +128,7 @@ public class DailyGourmetDbContext : DbContext
         modelBuilder.Entity<RouteStop>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.DeliveryRoute.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<RouteStopItem>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.RouteStop.DeliveryRoute.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<SupportTicketReply>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.Ticket.TenantId == _tenantContext.TenantId);
+        modelBuilder.Entity<SupportTicketAttachment>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.Ticket.TenantId == _tenantContext.TenantId);
     }
 
     private System.Linq.Expressions.Expression<Func<TEntity, bool>> BuildTenantFilter<TEntity>()

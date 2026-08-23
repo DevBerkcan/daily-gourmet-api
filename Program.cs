@@ -15,12 +15,18 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
+// QuestPDF Community license is free for organizations under $1M annual revenue — confirm this
+// still applies before shipping; PdfSharp+MigraDoc is the documented fallback otherwise.
+QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // ---- Options ----
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection(SmtpOptions.SectionName));
 builder.Services.Configure<CorsOptions>(builder.Configuration.GetSection(CorsOptions.SectionName));
+builder.Services.Configure<AppOptions>(builder.Configuration.GetSection(AppOptions.SectionName));
+builder.Services.Configure<FileStorageOptions>(builder.Configuration.GetSection(FileStorageOptions.SectionName));
 
 // ---- Data ----
 builder.Services.AddScoped<ITenantContext, TenantContext>();
@@ -75,6 +81,8 @@ builder.Services.AddCors(options =>
 
 // ---- Services ----
 builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<IPdfService, PdfService>();
+builder.Services.AddScoped<IFileStorageService, LocalFileStorageService>();
 
 // ---- Repositories ----
 // Open-generic registration covers every entity that doesn't need custom queries; entities that
@@ -86,6 +94,7 @@ builder.Services.AddScoped<ITenantSettingsRepository, TenantSettingsRepository>(
 // ---- Handlers ----
 builder.Services.AddScoped<AuthHandler>();
 builder.Services.AddScoped<FacilityHandler>();
+builder.Services.AddScoped<FacilityClosureHandler>();
 builder.Services.AddRecipesIngredientsModule();
 builder.Services.AddMealPlansOrdersModule();
 builder.Services.AddProductionKitchenModule();

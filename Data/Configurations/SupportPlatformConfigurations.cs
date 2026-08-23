@@ -38,6 +38,21 @@ public class SupportTicketReplyConfiguration : IEntityTypeConfiguration<SupportT
     }
 }
 
+public class SupportTicketAttachmentConfiguration : IEntityTypeConfiguration<SupportTicketAttachment>
+{
+    public void Configure(EntityTypeBuilder<SupportTicketAttachment> b)
+    {
+        b.Property(a => a.FileName).HasMaxLength(260).IsRequired();
+        b.Property(a => a.ContentType).HasMaxLength(100).IsRequired();
+        b.Property(a => a.StorageKey).HasMaxLength(500).IsRequired();
+
+        b.HasOne(a => a.Ticket).WithMany(t => t.Attachments)
+            .HasForeignKey(a => a.TicketId).OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(a => a.UploadedByUser).WithMany()
+            .HasForeignKey(a => a.UploadedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
 public class SupportSessionConfiguration : IEntityTypeConfiguration<SupportSession>
 {
     public void Configure(EntityTypeBuilder<SupportSession> b)

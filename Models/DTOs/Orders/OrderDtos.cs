@@ -47,6 +47,21 @@ public class OverrideOrderDto
     [Required, MinLength(1)] public string Reason { get; set; } = string.Empty;
 }
 
+/// <summary>One line of a same-day adjustment — always a reduction (or unchanged) on an item that
+/// already exists on the order, never a new item and never an increase. See
+/// OrderHandler.AdjustSameDayAsync.</summary>
+public class AdjustOrderItemDto
+{
+    [Required] public Guid ItemId { get; set; }
+    [Range(0, int.MaxValue)] public int Portions { get; set; }
+    [Required, MinLength(1)] public string Note { get; set; } = string.Empty;
+}
+
+public class AdjustOrderDto
+{
+    [Required, MinLength(1)] public List<AdjustOrderItemDto> Items { get; set; } = [];
+}
+
 public class AuditLogEntryDto
 {
     public Guid Id { get; set; }

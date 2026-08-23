@@ -12,12 +12,12 @@ namespace DailyGourmet.Api.Controllers;
 public class LocationsController(LocationHandler handler) : ControllerBase
 {
     [HttpGet]
-    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,KITCHEN_MANAGER,KITCHEN_STAFF")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<PagedResult<LocationDto>>>> List([FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default) =>
         Ok(ApiResponse<PagedResult<LocationDto>>.Ok(await handler.ListAsync(page, pageSize, ct)));
 
     [HttpGet("{id:guid}")]
-    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,KITCHEN_MANAGER,KITCHEN_STAFF")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<LocationDto>>> GetById(Guid id, CancellationToken ct) =>
         Ok(ApiResponse<LocationDto>.Ok(await handler.GetByIdAsync(id, ct)));
 

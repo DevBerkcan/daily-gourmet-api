@@ -20,12 +20,13 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
         .Include(m => m.Facilities)
         .Include(m => m.Days).ThenInclude(d => d.Items).ThenInclude(i => i.Recipe);
 
-    public async Task<PagedResult<MealPlanDto>> ListAsync(int? year, int? calendarWeek, string? status, int page, int pageSize, CancellationToken ct = default)
+    public async Task<PagedResult<MealPlanDto>> ListAsync(int? year, int? calendarWeek, string? status, bool? isTemplate, int page, int pageSize, CancellationToken ct = default)
     {
         var query = FullQuery(db).AsQueryable();
         if (year is { } y) query = query.Where(m => m.Year == y);
         if (calendarWeek is { } w) query = query.Where(m => m.CalendarWeek == w);
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<MealPlanStatus>(status, out var s)) query = query.Where(m => m.Status == s);
+        if (isTemplate is { } template) query = query.Where(m => m.IsTemplate == template);
 
         var total = await query.CountAsync(ct);
         var items = await query.OrderByDescending(m => m.Year).ThenByDescending(m => m.CalendarWeek)
@@ -38,7 +39,11 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
 
     public async Task<MealPlanDto> CreateAsync(CreateMealPlanDto dto, CancellationToken ct = default)
     {
-        var plan = new MealPlan { Id = Guid.NewGuid(), TenantId = tenantContext.TenantId!.Value, CalendarWeek = dto.CalendarWeek, Year = dto.Year, Status = MealPlanStatus.DRAFT };
+        var plan = new MealPlan
+        {
+            Id = Guid.NewGuid(), TenantId = tenantContext.TenantId!.Value, CalendarWeek = dto.CalendarWeek, Year = dto.Year, Status = MealPlanStatus.DRAFT,
+            IsTemplate = dto.IsTemplate, TemplateSlot = dto.IsTemplate ? dto.TemplateSlot : null,
+        };
         db.MealPlans.Add(plan);
         AddLocationsAndFacilities(plan.Id, dto.LocationIds, dto.FacilityIds);
         AddDays(plan.Id, dto.Year, dto.CalendarWeek);
@@ -47,6 +52,10 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
         catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("IX_MealPlans_TenantId_Year_CalendarWeek") == true)
         {
             throw new ConflictException("Für diese Kalenderwoche existiert bereits ein Speiseplan.");
+        }
+        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("IX_MealPlans_TenantId_TemplateSlot") == true)
+        {
+            throw new ConflictException("Dieser Vorlagenplatz (1-8) ist bereits belegt.");
         }
         return await GetByIdAsync(plan.Id, ct);
     }
@@ -68,8 +77,11 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
             var day = plan.Days.FirstOrDefault(d => d.Id == dayDto.DayId) ?? throw new ValidationException("Unbekannter Tag in diesem Speiseplan.");
             day.Note = dayDto.Note;
             db.MealPlanItems.RemoveRange(day.Items);
-            foreach (var recipeId in dayDto.RecipeIds)
-                db.MealPlanItems.Add(new MealPlanItem { Id = Guid.NewGuid(), MealPlanDayId = day.Id, RecipeId = recipeId, CreatedAt = DateTime.UtcNow });
+            foreach (var itemDto in dayDto.Items)
+            {
+                var dietLine = Enum.TryParse<DietLine>(itemDto.DietLine, out var dl) ? dl : DietLine.NORMALKOST;
+                db.MealPlanItems.Add(new MealPlanItem { Id = Guid.NewGuid(), MealPlanDayId = day.Id, RecipeId = itemDto.RecipeId, DietLine = dietLine, CreatedAt = DateTime.UtcNow });
+            }
         }
 
         plan.UpdatedAt = DateTime.UtcNow;
@@ -77,21 +89,33 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
         return await GetByIdAsync(id, ct);
     }
 
-    public async Task<MealPlanDto> DuplicateAsync(Guid id, CancellationToken ct = default)
+    /// <summary>Duplicates a plan — a template or an arbitrary past/other week — into a target
+    /// calendar week. Serves both "create this week from Vorlage 3" and "duplicate KW36 into KW37"
+    /// with one operation; when no explicit target is given, defaults to the next ISO week after
+    /// the source (the original behavior of the plain "Duplizieren" action).</summary>
+    public async Task<MealPlanDto> DuplicateAsync(Guid id, int? targetYear = null, int? targetCalendarWeek = null, CancellationToken ct = default)
     {
         var source = await FullQuery(db).FirstOrDefaultAsync(m => m.Id == id, ct) ?? throw new NotFoundException(nameof(MealPlan), id);
 
-        var weeksInYear = ISOWeek.GetWeeksInYear(source.Year);
-        int targetWeek, targetYear;
-        if (source.CalendarWeek + 1 > weeksInYear) { targetWeek = 1; targetYear = source.Year + 1; }
-        else { targetWeek = source.CalendarWeek + 1; targetYear = source.Year; }
+        int targetWeek, targetYearResolved;
+        if (targetYear is { } ty && targetCalendarWeek is { } tw)
+        {
+            targetYearResolved = ty;
+            targetWeek = tw;
+        }
+        else
+        {
+            var weeksInYear = ISOWeek.GetWeeksInYear(source.Year);
+            if (source.CalendarWeek + 1 > weeksInYear) { targetWeek = 1; targetYearResolved = source.Year + 1; }
+            else { targetWeek = source.CalendarWeek + 1; targetYearResolved = source.Year; }
+        }
 
-        var copy = new MealPlan { Id = Guid.NewGuid(), TenantId = source.TenantId, CalendarWeek = targetWeek, Year = targetYear, Status = MealPlanStatus.DRAFT };
+        var copy = new MealPlan { Id = Guid.NewGuid(), TenantId = source.TenantId, CalendarWeek = targetWeek, Year = targetYearResolved, Status = MealPlanStatus.DRAFT };
         db.MealPlans.Add(copy);
         foreach (var loc in source.Locations) db.MealPlanLocations.Add(new MealPlanLocation { MealPlanId = copy.Id, LocationId = loc.LocationId });
         foreach (var fac in source.Facilities) db.MealPlanFacilities.Add(new MealPlanFacility { MealPlanId = copy.Id, FacilityId = fac.FacilityId });
 
-        var monday = ISOWeek.ToDateTime(targetYear, targetWeek, DayOfWeek.Monday);
+        var monday = ISOWeek.ToDateTime(targetYearResolved, targetWeek, DayOfWeek.Monday);
         var sourceDays = source.Days.OrderBy(d => d.Date).ToList();
         for (var i = 0; i < 5; i++)
         {
@@ -101,12 +125,25 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
             {
                 newDay.Note = sourceDays[i].Note;
                 foreach (var item in sourceDays[i].Items)
-                    db.MealPlanItems.Add(new MealPlanItem { Id = Guid.NewGuid(), MealPlanDayId = newDay.Id, RecipeId = item.RecipeId, CreatedAt = DateTime.UtcNow });
+                    db.MealPlanItems.Add(new MealPlanItem { Id = Guid.NewGuid(), MealPlanDayId = newDay.Id, RecipeId = item.RecipeId, DietLine = item.DietLine, CreatedAt = DateTime.UtcNow });
             }
         }
 
-        await db.SaveChangesAsync(ct);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("IX_MealPlans_TenantId_Year_CalendarWeek") == true)
+        {
+            throw new ConflictException("Für diese Kalenderwoche existiert bereits ein Speiseplan.");
+        }
         return await GetByIdAsync(copy.Id, ct);
+    }
+
+    public async Task DeleteAsync(Guid id, CancellationToken ct = default)
+    {
+        var plan = await db.MealPlans.FirstOrDefaultAsync(m => m.Id == id, ct) ?? throw new NotFoundException(nameof(MealPlan), id);
+        if (plan.Status != MealPlanStatus.DRAFT)
+            throw new ConflictException("Nur Entwürfe können gelöscht werden — versehentlich duplizierte Wochen lassen sich so entfernen.");
+        db.MealPlans.Remove(plan);
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task<MealPlanDto> SubmitReviewAsync(Guid id, CancellationToken ct = default) => await TransitionAsync(id, MealPlanStatus.DRAFT, MealPlanStatus.REVIEW, ct);
@@ -120,7 +157,7 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
         foreach (var day in plan.Days)
         foreach (var item in day.Items)
         {
-            var snapshot = new { item.Recipe.Id, item.Recipe.Name, item.Recipe.StandardPortions, item.Recipe.Nutrition };
+            var snapshot = new { item.Recipe.Id, item.Recipe.Name, item.Recipe.StandardPortions, item.Recipe.Nutrition, DietLine = item.DietLine.ToString() };
             item.RecipeSnapshotJson = JsonSerializer.Serialize(snapshot);
         }
         plan.Status = MealPlanStatus.PUBLISHED;
@@ -196,12 +233,14 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
         CalendarWeek = m.CalendarWeek,
         Year = m.Year,
         Status = m.Status.ToString(),
+        IsTemplate = m.IsTemplate,
+        TemplateSlot = m.TemplateSlot,
         LocationIds = m.Locations.Select(l => l.LocationId).ToArray(),
         FacilityIds = m.Facilities.Select(f => f.FacilityId).ToArray(),
         Days = m.Days.OrderBy(d => d.Date).Select(d => new MealPlanDayDto
         {
             Id = d.Id, Weekday = d.Weekday, Date = d.Date, Note = d.Note,
-            Items = d.Items.Select(i => new MealPlanItemDto { Id = i.Id, RecipeId = i.RecipeId, RecipeName = i.Recipe?.Name ?? string.Empty }).ToList(),
+            Items = d.Items.Select(i => new MealPlanItemDto { Id = i.Id, RecipeId = i.RecipeId, RecipeName = i.Recipe?.Name ?? string.Empty, DietLine = i.DietLine.ToString() }).ToList(),
         }).ToList(),
     };
 }

@@ -11,6 +11,27 @@ public class RecipeIngredientDto
     public string Unit { get; set; } = string.Empty;
 }
 
+/// <summary>Nutrition per 100 g of the finished recipe (matching the frontend's existing
+/// `naehrwertePro100g` contract, and Recipe.Nutrition's own semantics) — only populated when the
+/// recipe carries authoritative imported values. There is no live ingredient-based computation yet:
+/// that needs a cross-unit (g/kg/ml/l/Stück) conversion layer that doesn't exist anywhere in the
+/// codebase today, which is out of scope here — this simply passes the authoritative value through
+/// when present. Scale by Recipe.PortionWeightG/100 for a per-portion figure (see
+/// RecipeHandler.ScaleNutritionToPortion, used by the label PDF).</summary>
+public class RecipeNutritionDto
+{
+    public decimal Kcal { get; set; }
+    public decimal Kj { get; set; }
+    public decimal FatG { get; set; }
+    public decimal SaturatedFatG { get; set; }
+    public decimal CarbsG { get; set; }
+    public decimal SugarG { get; set; }
+    public decimal FiberG { get; set; }
+    public decimal ProteinG { get; set; }
+    public decimal SaltG { get; set; }
+    public decimal AlcoholG { get; set; }
+}
+
 public class RecipeDto
 {
     public Guid Id { get; set; }
@@ -25,6 +46,13 @@ public class RecipeDto
     public string Difficulty { get; set; } = string.Empty;
     public bool Vegetarian { get; set; }
     public bool Vegan { get; set; }
+    public bool GlutenFree { get; set; }
+    public bool LactoseFree { get; set; }
+    public bool DgeCertified { get; set; }
+    /// <summary>Computed, not stored — see RecipeHandler.ComputeEstimatedCostPerPortion. Null when
+    /// no ingredient price (supplier or standard) is available yet to base an estimate on.</summary>
+    public decimal? EstimatedCostPerPortion { get; set; }
+    public RecipeNutritionDto? Nutrition { get; set; }
     public string? ProductionNotes { get; set; }
     public string? ImageUrl { get; set; }
     public decimal? CoreTemperatureC { get; set; }
@@ -66,6 +94,9 @@ public class SaveRecipeDto
     [Required] public Difficulty Difficulty { get; set; }
     public bool Vegetarian { get; set; }
     public bool Vegan { get; set; }
+    public bool GlutenFree { get; set; }
+    public bool LactoseFree { get; set; }
+    public bool DgeCertified { get; set; }
     public bool Active { get; set; } = true;
     public string? ProductionNotes { get; set; }
     public string? ImageUrl { get; set; }

@@ -35,6 +35,8 @@ public class Facility : BaseEntity, ITenantScoped
     /// <summary>Overrides TenantSettings default when set.</summary>
     public int? OrderDeadlineOffsetDays { get; set; }
     public TimeSpan? OrderDeadlineTime { get; set; }
+    /// <summary>Per-facility override of TenantSettings.SameDayAdjustmentDeadlineTime.</summary>
+    public TimeSpan? SameDayAdjustmentDeadlineTime { get; set; }
 
     /// <summary>CSV of active weekdays, e.g. "Mo,Di,Mi,Do,Fr".</summary>
     public string ActiveWeekdays { get; set; } = "Mo,Di,Mi,Do,Fr";
@@ -43,6 +45,31 @@ public class Facility : BaseEntity, ITenantScoped
     public FacilityStatus Status { get; set; } = FacilityStatus.AKTIV;
     public string? Notes { get; set; }
 
+    /// <summary>Stable default tour, e.g. "RT1" (Nummernkreis, see TenantSettings) — this is what the
+    /// production-plan print groups by, deliberately not that day's DeliveryRoute, since routes are
+    /// driver-claimed (see DeliveryRoute.DriverId) and may not exist yet when the plan is printed.</summary>
+    public string? RouteNumber { get; set; }
+
     public ICollection<User> Users { get; set; } = new List<User>();
     public ICollection<Order> Orders { get; set; } = new List<Order>();
+    public ICollection<FacilityClosure> Closures { get; set; } = new List<FacilityClosure>();
+}
+
+/// <summary>A facility-declared closure period (Schließtage/Abwesenheit) — e.g. summer break —
+/// entered by the facility itself a year ahead, or by admin staff on the facility's behalf when
+/// notified late. Blocks/flags meal-plan and order weeks that overlap it.</summary>
+public class FacilityClosure : BaseEntity, ITenantScoped
+{
+    public Guid TenantId { get; set; }
+    public Tenant Tenant { get; set; } = null!;
+    public Guid FacilityId { get; set; }
+    public Facility Facility { get; set; } = null!;
+
+    public DateOnly StartDate { get; set; }
+    public DateOnly EndDate { get; set; }
+    public string? Note { get; set; }
+    /// <summary>Null when the facility entered it themselves; set when admin/Verwaltung added it on
+    /// the facility's behalf (e.g. from a late-arriving email).</summary>
+    public Guid? CreatedByUserId { get; set; }
+    public User? CreatedByUser { get; set; }
 }
