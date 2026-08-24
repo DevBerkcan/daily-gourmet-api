@@ -72,4 +72,17 @@ public class RecipesController(RecipeHandler handler) : ControllerBase
         var bytes = await handler.RenderLabelAsync(id, ct);
         return File(bytes, "application/pdf", $"etikett-{id}.pdf");
     }
+
+    [HttpPost("import")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    [RequestSizeLimit(20_000_000)]
+    public async Task<ActionResult<ApiResponse<RecipeImportResultDto>>> Import(IFormFile zutatenMengenFile, IFormFile artikeldatenFile, CancellationToken ct)
+    {
+        if (zutatenMengenFile.Length == 0 || artikeldatenFile.Length == 0)
+            throw new DailyGourmet.Api.Helpers.ValidationException("Beide Dateien (Zutaten-Mengen und Artikeldaten) werden benötigt.");
+        await using var zutatenStream = zutatenMengenFile.OpenReadStream();
+        await using var artikelStream = artikeldatenFile.OpenReadStream();
+        var result = await handler.ImportFromRezeptrechnerAsync(zutatenStream, artikelStream, ct);
+        return Ok(ApiResponse<RecipeImportResultDto>.Ok(result));
+    }
 }

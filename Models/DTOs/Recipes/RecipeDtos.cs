@@ -122,3 +122,20 @@ public class RecipeScaleResultDto
     public decimal Factor { get; set; }
     public List<RecipeScaleIngredientDto> Ingredients { get; set; } = [];
 }
+
+public class RecipeImportWarningDto
+{
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>Result of RecipeHandler.ImportFromRezeptrechnerAsync — the recipe-side counterpart to
+/// Ingredients.SyncResultDto, plus the ingredients that import implicitly syncs along the way.</summary>
+public class RecipeImportResultDto
+{
+    public int RecipesAdded { get; set; }
+    public int RecipesUpdated { get; set; }
+    public int IngredientsAdded { get; set; }
+    public int IngredientsUpdated { get; set; }
+    public int IngredientsSkippedManuallyEdited { get; set; }
+    public List<RecipeImportWarningDto> Warnings { get; set; } = [];
+}

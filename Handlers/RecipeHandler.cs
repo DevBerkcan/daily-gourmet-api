@@ -2,6 +2,7 @@ using DailyGourmet.Api.Authentication;
 using DailyGourmet.Api.Data;
 using DailyGourmet.Api.Helpers;
 using DailyGourmet.Api.Models.DTOs;
+using DailyGourmet.Api.Models.DTOs.Ingredients;
 using DailyGourmet.Api.Models.DTOs.Recipes;
 using DailyGourmet.Api.Models.Entities;
 using DailyGourmet.Api.Models.Enums;
@@ -11,7 +12,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IPdfService pdfService)
+public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IPdfService pdfService, IngredientHandler ingredientHandler)
 {
     private static IQueryable<Recipe> FullQuery(DailyGourmetDbContext db) => db.Recipes
         .Include(r => r.Category)
@@ -157,6 +158,216 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
         recipe.Active = false;
         recipe.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+    }
+
+    // ---- Rezeptrechner import (recipes + the ingredients they reference) ----
+    //
+    // Real export sample confirmed the two files' shape (see RezeptrechnerCsvParser). The third
+    // export the customer sent (Preise-Wareneinsatz) has €0.00 in every row — no real pricing exists
+    // yet, and there's nowhere on Recipe to store it anyway (EstimatedCostPerPortion above is always
+    // computed live from Ingredient/IngredientSupplierPrice, never stored) — so it's intentionally
+    // not read here. Real prices, once available, go in through the existing per-ingredient
+    // Lieferantenpreise screen instead.
+
+    private static readonly Dictionary<string, string> CategoryTypoFixes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Haubtgericht"] = "Hauptgericht",
+        ["Nachspeise"] = "Dessert",
+    };
+    private static readonly HashSet<string> VegetarianTags = new(StringComparer.OrdinalIgnoreCase) { "Veggie", "Vegetarisch" };
+    private static readonly HashSet<string> VeganTags = new(StringComparer.OrdinalIgnoreCase) { "Vegan" };
+    private static readonly HashSet<string> GlutenFreeTags = new(StringComparer.OrdinalIgnoreCase) { "Glutenfrei" };
+    private static readonly HashSet<string> LactoseFreeTags = new(StringComparer.OrdinalIgnoreCase) { "Lactosefrei", "Laktosefrei" };
+
+    private record ParsedCategory(string? CategoryName, bool Vegetarian, bool Vegan, bool GlutenFree, bool LactoseFree);
+
+    /// <summary>The source "Kategorie" column is free text that mixes a real category name with
+    /// comma-joined dietary tags ("Hauptgericht, Veggie") or holds only tags ("Glutenfrei,
+    /// Lactosefrei") with no category at all — plus real-world typos ("Haubtgericht" ×26). Each
+    /// token is checked against known category names (after typo-fixing) and known dietary tags;
+    /// the first token that matches a category wins, unrecognized tokens (portion-size notes,
+    /// stray free text) are silently ignored rather than rejected.</summary>
+    private static ParsedCategory ResolveCategory(string? raw, IReadOnlyCollection<string> knownCategoryNames)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return new ParsedCategory(null, false, false, false, false);
+        string? matchedCategory = null;
+        bool vegetarian = false, vegan = false, glutenFree = false, lactoseFree = false;
+        foreach (var rawToken in raw.Split(','))
+        {
+            var token = rawToken.Trim();
+            if (token.Length == 0) continue;
+            if (CategoryTypoFixes.TryGetValue(token, out var fixedName)) token = fixedName;
+
+            if (VegetarianTags.Contains(token)) { vegetarian = true; continue; }
+            if (VeganTags.Contains(token)) { vegan = true; vegetarian = true; continue; }
+            if (GlutenFreeTags.Contains(token)) { glutenFree = true; continue; }
+            if (LactoseFreeTags.Contains(token)) { lactoseFree = true; continue; }
+
+            if (matchedCategory is null)
+                matchedCategory = knownCategoryNames.FirstOrDefault(n => string.Equals(n, token, StringComparison.OrdinalIgnoreCase));
+        }
+        return new ParsedCategory(matchedCategory, vegetarian, vegan, glutenFree, lactoseFree);
+    }
+
+    private static IEnumerable<string> SplitTags(string? raw) =>
+        string.IsNullOrWhiteSpace(raw)
+            ? []
+            : raw.Split(',').Select(t => t.Trim()).Where(t => t.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase);
+
+    private static string NextArticleNumber(HashSet<string> used)
+    {
+        var i = used.Count + 1;
+        while (true)
+        {
+            var candidate = $"ZUT-{i:D4}";
+            if (used.Add(candidate)) return candidate;
+            i++;
+        }
+    }
+
+    public async Task<RecipeImportResultDto> ImportFromRezeptrechnerAsync(Stream zutatenMengenCsv, Stream artikeldatenCsv, CancellationToken ct = default)
+    {
+        var tenantId = tenantContext.TenantId!.Value;
+        var result = new RecipeImportResultDto();
+
+        var zutatenRows = RezeptrechnerCsvParser.ParseZutatenMengen(zutatenMengenCsv);
+        var artikelRows = RezeptrechnerCsvParser.ParseArtikeldaten(artikeldatenCsv);
+
+        // ---- Step 1: sync every raw ingredient referenced by a recipe line (reuses the existing,
+        // manual-edit-protecting Ingredient sync — see IngredientHandler.SyncAsync) ----
+        var usedArticleNumbers = new HashSet<string>(await db.Ingredients.Select(i => i.ArticleNumber).ToListAsync(ct), StringComparer.OrdinalIgnoreCase);
+        var ingredientRows = zutatenRows
+            .GroupBy(r => r.IngredientExternalRefId)
+            .Select(g => g.First())
+            .Select(u => new RezeptrechnerImportRowDto
+            {
+                ExternalRefId = u.IngredientExternalRefId,
+                Name = u.IngredientName,
+                ArticleNumber = NextArticleNumber(usedArticleNumbers),
+                BaseUnit = Unit.kg,
+                PurchaseUnit = "kg",
+                ConversionFactor = 1,
+            })
+            .ToList();
+
+        var ingredientSync = await ingredientHandler.SyncAsync(ingredientRows, ct);
+        result.IngredientsAdded = ingredientSync.Added;
+        result.IngredientsUpdated = ingredientSync.Updated;
+        result.IngredientsSkippedManuallyEdited = ingredientSync.SkippedManuallyEdited;
+
+        var ingredientIdByRef = await db.Ingredients.Where(i => i.ExternalRefId != null).ToDictionaryAsync(i => i.ExternalRefId!, i => i.Id, ct);
+
+        // ---- Step 2: upsert every recipe by name, matching the two files together ----
+        var ingredientsByRecipe = zutatenRows.GroupBy(r => r.RecipeName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+        var artikelByRecipe = artikelRows.GroupBy(a => a.RecipeName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        var allRecipeNames = new HashSet<string>(ingredientsByRecipe.Keys, StringComparer.OrdinalIgnoreCase);
+        allRecipeNames.UnionWith(artikelByRecipe.Keys);
+
+        var categories = await db.RecipeCategories.ToListAsync(ct);
+        var categoryNames = categories.Select(c => c.Name).ToList();
+        var fallbackCategoryId = categories.FirstOrDefault(c => c.Name == "Sonstiges")?.Id ?? categories.FirstOrDefault()?.Id
+            ?? throw new ValidationException("Keine Rezeptkategorie vorhanden — bitte zuerst mindestens eine Kategorie anlegen.");
+
+        var authorUserId = await db.Users.Where(u => u.Role == Role.TENANT_OWNER).OrderBy(u => u.CreatedAt).Select(u => (Guid?)u.Id).FirstOrDefaultAsync(ct)
+            ?? await db.Users.OrderBy(u => u.CreatedAt).Select(u => (Guid?)u.Id).FirstOrDefaultAsync(ct)
+            ?? throw new ValidationException("Kein Benutzer im Mandanten vorhanden, dem importierte Rezepte zugeordnet werden können.");
+
+        var existingRecipes = await db.Recipes
+            .Include(r => r.Ingredients).Include(r => r.AllergenOverrides).Include(r => r.AdditiveOverrides).Include(r => r.NutritionClaims)
+            .ToDictionaryAsync(r => r.Name, StringComparer.OrdinalIgnoreCase, ct);
+
+        var now = DateTime.UtcNow;
+
+        foreach (var recipeName in allRecipeNames)
+        {
+            artikelByRecipe.TryGetValue(recipeName, out var artikel);
+            ingredientsByRecipe.TryGetValue(recipeName, out var ingredientLines);
+            ingredientLines ??= [];
+
+            var parsedCategory = ResolveCategory(artikel?.CategoryRaw, categoryNames);
+            var categoryId = parsedCategory.CategoryName is { } catName ? categories.First(c => c.Name == catName).Id : fallbackCategoryId;
+            if (parsedCategory.CategoryName is null && artikel?.CategoryRaw is not null)
+                result.Warnings.Add(new RecipeImportWarningDto { Reason = $"Rezept „{recipeName}“: Kategorie „{artikel.CategoryRaw}“ nicht erkannt — „Sonstiges“ verwendet." });
+
+            var standardPortions = artikel?.StandardPortions ?? ingredientLines.Select(l => l.PortionsInFile).FirstOrDefault();
+            if (standardPortions <= 0) standardPortions = 10;
+
+            var description = artikel?.IngredientListText is { Length: > 0 } list ? (list.Length > 2000 ? list[..2000] : list) : recipeName;
+            var nutrition = artikel is null ? null : new RecipeNutrition
+            {
+                Kcal = artikel.KcalPer100, Kj = artikel.KjPer100, FatG = artikel.FatPer100, SaturatedFatG = artikel.SaturatedFatPer100,
+                CarbsG = artikel.CarbsPer100, SugarG = artikel.SugarPer100, FiberG = artikel.FiberPer100, ProteinG = artikel.ProteinPer100,
+                SaltG = artikel.SaltPer100, AlcoholG = artikel.AlcoholPer100,
+            };
+            NutriScore? nutriScore = artikel?.NutriScore is { } ns && Enum.TryParse<NutriScore>(ns, true, out var parsedScore) ? parsedScore : null;
+
+            if (!ingredientLines.Any() && artikel is not null)
+                result.Warnings.Add(new RecipeImportWarningDto { Reason = $"Rezept „{recipeName}“: keine Zutatenzeilen gefunden — Rezept ohne Zutaten angelegt." });
+
+            Recipe recipe;
+            if (existingRecipes.TryGetValue(recipeName, out var found))
+            {
+                recipe = found;
+                recipe.CategoryId = categoryId;
+                recipe.RecipeNumber = artikel?.RecipeNumber ?? recipe.RecipeNumber;
+                recipe.StandardPortions = standardPortions;
+                recipe.PortionWeightG = artikel?.PortionWeightG ?? recipe.PortionWeightG;
+                recipe.Vegetarian = parsedCategory.Vegetarian || recipe.Vegetarian;
+                recipe.Vegan = parsedCategory.Vegan || recipe.Vegan;
+                recipe.GlutenFree = parsedCategory.GlutenFree || recipe.GlutenFree;
+                recipe.LactoseFree = parsedCategory.LactoseFree || recipe.LactoseFree;
+                recipe.Description = description;
+                recipe.Nutrition = nutrition ?? recipe.Nutrition;
+                recipe.NutriScore = nutriScore ?? recipe.NutriScore;
+                recipe.NutriScoreCategory = artikel?.NutriScoreCategory ?? recipe.NutriScoreCategory;
+                recipe.Version += 1;
+                recipe.UpdatedAt = now;
+
+                db.RecipeIngredients.RemoveRange(recipe.Ingredients);
+                db.RecipeAllergenOverrides.RemoveRange(recipe.AllergenOverrides);
+                db.RecipeAdditiveOverrides.RemoveRange(recipe.AdditiveOverrides);
+                db.RecipeNutritionClaims.RemoveRange(recipe.NutritionClaims);
+                result.RecipesUpdated++;
+            }
+            else
+            {
+                recipe = new Recipe
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, CategoryId = categoryId, CreatedByUserId = authorUserId,
+                    Name = recipeName, Description = description, RecipeNumber = artikel?.RecipeNumber,
+                    StandardPortions = standardPortions, PortionWeightG = artikel?.PortionWeightG,
+                    PrepTimeMinutes = 0, Difficulty = Difficulty.Mittel,
+                    Vegetarian = parsedCategory.Vegetarian, Vegan = parsedCategory.Vegan,
+                    GlutenFree = parsedCategory.GlutenFree, LactoseFree = parsedCategory.LactoseFree,
+                    Active = true, Version = 1, CreatedAt = now,
+                    Nutrition = nutrition, NutriScore = nutriScore, NutriScoreCategory = artikel?.NutriScoreCategory,
+                };
+                db.Recipes.Add(recipe);
+                result.RecipesAdded++;
+            }
+
+            foreach (var line in ingredientLines)
+            {
+                if (!ingredientIdByRef.TryGetValue(line.IngredientExternalRefId, out var ingredientId))
+                {
+                    result.Warnings.Add(new RecipeImportWarningDto { Reason = $"Rezept „{recipeName}“: Zutat „{line.IngredientName}“ konnte keiner Zutat zugeordnet werden." });
+                    continue;
+                }
+                db.RecipeIngredients.Add(new RecipeIngredient { Id = Guid.NewGuid(), RecipeId = recipe.Id, IngredientId = ingredientId, Quantity = line.Quantity, Unit = Unit.kg, CreatedAt = now });
+            }
+
+            foreach (var text in SplitTags(artikel?.AllergensText))
+                db.RecipeAllergenOverrides.Add(new RecipeAllergenOverride { Id = Guid.NewGuid(), RecipeId = recipe.Id, Text = text, CreatedAt = now });
+            foreach (var text in SplitTags(artikel?.AdditivesText))
+                db.RecipeAdditiveOverrides.Add(new RecipeAdditiveOverride { Id = Guid.NewGuid(), RecipeId = recipe.Id, Text = text, CreatedAt = now });
+            foreach (var text in SplitTags(artikel?.NutritionClaimsText))
+                db.RecipeNutritionClaims.Add(new RecipeNutritionClaim { Id = Guid.NewGuid(), RecipeId = recipe.Id, Text = text, CreatedAt = now });
+        }
+
+        await db.SaveChangesAsync(ct);
+        return result;
     }
 
     public async Task<RecipeScaleResultDto> ScaleAsync(Guid id, int portions, CancellationToken ct = default)
