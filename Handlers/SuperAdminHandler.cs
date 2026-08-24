@@ -8,12 +8,14 @@ using DailyGourmet.Api.Models.DTOs.Tenants;
 using DailyGourmet.Api.Models.DTOs.Users;
 using DailyGourmet.Api.Models.Entities;
 using DailyGourmet.Api.Models.Enums;
+using DailyGourmet.Api.Options;
 using DailyGourmet.Api.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IEmailService email)
+public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IEmailService email, IOptions<AppOptions> appOptions)
 {
     public async Task<SuperAdminDashboardDto> DashboardAsync(CancellationToken ct = default)
     {
@@ -75,9 +77,7 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
         db.Users.Add(user);
         await db.SaveChangesAsync(ct);
 
-        await email.SendAsync(user.Email, user.Name, "Einladung zu Daily Gourmet",
-            $"<p>Sie wurden zu Daily Gourmet eingeladen. <a href=\"https://app.example/accept-invite/{token}\">Einladung annehmen</a></p>",
-            $"Sie wurden zu Daily Gourmet eingeladen. Link: https://app.example/accept-invite/{token}");
+        await SendInvitationEmailAsync(user, token);
 
         return await ToTenantDtoAsync(tenant, ct);
     }
@@ -112,7 +112,7 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
     public async Task<List<UserDto>> TenantUsersAsync(Guid tenantId, CancellationToken ct = default)
     {
         var users = await db.Users.IgnoreQueryFilters().Include(u => u.Facility).Where(u => u.TenantId == tenantId).ToListAsync(ct);
-        return users.Select(u => ToUserDto(u, null)).ToList();
+        return users.Select(u => ToUserDto(u, null, u.Facility?.Name)).ToList();
     }
 
     public async Task<PagedResult<UserDto>> GlobalUsersAsync(Guid? tenantId, string? role, string? status, int page, int pageSize, CancellationToken ct = default)
@@ -124,7 +124,71 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
 
         var total = await query.CountAsync(ct);
         var items = await query.OrderBy(u => u.Name).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
-        return new PagedResult<UserDto> { Items = items.Select(u => ToUserDto(u, u.Tenant?.Name)).ToList(), Total = total, Page = page, PageSize = pageSize };
+        return new PagedResult<UserDto> { Items = items.Select(u => ToUserDto(u, u.Tenant?.Name, u.Facility?.Name)).ToList(), Total = total, Page = page, PageSize = pageSize };
+    }
+
+    /// <summary>Super admin adds a login-capable user directly and picks their role/tenant — unlike
+    /// UserManagementHandler.InviteAsync, which a tenant admin uses and which is scoped to their own
+    /// tenant. Sends the same "set your password" invitation email; AuthHandler.AcceptInvitationAsync
+    /// is the single place that later turns the invite into an active account.</summary>
+    public async Task<UserDto> CreateUserAsync(CreateUserDto dto, CancellationToken ct = default)
+    {
+        if (!Enum.TryParse<Role>(dto.Role, out var role)) throw new ValidationException("Ungültige Rolle.");
+
+        Guid? tenantId = dto.TenantId;
+        Tenant? tenant = null;
+        if (role == Role.SUPER_ADMIN)
+        {
+            tenantId = null;
+        }
+        else
+        {
+            if (tenantId is null) throw new ValidationException("Für diese Rolle ist ein Mandant erforderlich.");
+            tenant = await db.Tenants.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Id == tenantId, ct)
+                ?? throw new NotFoundException(nameof(Tenant), tenantId);
+        }
+
+        Guid? facilityId = null;
+        if (role is Role.FACILITY_ADMIN or Role.FACILITY_USER && dto.FacilityId is { } fid)
+        {
+            var facilityBelongsToTenant = await db.Facilities.IgnoreQueryFilters().AnyAsync(f => f.Id == fid && f.TenantId == tenantId, ct);
+            if (!facilityBelongsToTenant) throw new ValidationException("Die Einrichtung gehört nicht zum ausgewählten Mandanten.");
+            facilityId = fid;
+        }
+
+        var emailNormalized = dto.Email.Trim();
+        var emailExists = await db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == emailNormalized, ct);
+        if (emailExists) throw new ConflictException("Diese E-Mail-Adresse wird bereits verwendet.");
+
+        var token = Guid.NewGuid().ToString("N");
+        var user = new User
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FacilityId = facilityId, Name = dto.Name.Trim(), Email = emailNormalized,
+            PasswordHash = string.Empty, Role = role, Status = UserStatus.EINGELADEN,
+            InvitationToken = token, InvitationExpiresAt = DateTime.UtcNow.AddHours(72), CreatedAt = DateTime.UtcNow,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync(ct);
+
+        await SendInvitationEmailAsync(user, token);
+
+        string? facilityName = facilityId is { } fidResult
+            ? await db.Facilities.IgnoreQueryFilters().Where(f => f.Id == fidResult).Select(f => f.Name).FirstOrDefaultAsync(ct)
+            : null;
+        return ToUserDto(user, tenant?.Name, facilityName);
+    }
+
+    private async Task SendInvitationEmailAsync(User user, string token)
+    {
+        var baseUrl = appOptions.Value.PublicBaseUrl.TrimEnd('/');
+        var acceptUrl = $"{baseUrl}/accept-invite/{token}";
+        var html = $"""
+            <p>Sie wurden zu Daily Gourmet eingeladen. Klicken Sie auf den folgenden Link, um Ihr Passwort festzulegen und Ihr Konto zu aktivieren:</p>
+            <p><a href="{acceptUrl}">Konto aktivieren</a></p>
+            <p>Der Link ist 72 Stunden gültig.</p>
+            """;
+        var text = $"Sie wurden zu Daily Gourmet eingeladen. Passwort festlegen: {acceptUrl}\nDer Link ist 72 Stunden gültig.";
+        await email.SendAsync(user.Email, user.Name, "Einladung zu Daily Gourmet", html, text);
     }
 
     public async Task<List<FeatureFlagDto>> ListFeatureFlagsAsync(CancellationToken ct = default) =>
@@ -163,9 +227,9 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
         FacilityCount = await db.Facilities.IgnoreQueryFilters().CountAsync(f => f.TenantId == t.Id, ct),
     };
 
-    private static UserDto ToUserDto(User u, string? tenantName) => new()
+    private static UserDto ToUserDto(User u, string? tenantName, string? facilityName) => new()
     {
-        Id = u.Id, TenantId = u.TenantId, TenantName = tenantName, FacilityId = u.FacilityId, FacilityName = u.Facility?.Name,
+        Id = u.Id, TenantId = u.TenantId, TenantName = tenantName, FacilityId = u.FacilityId, FacilityName = facilityName,
         Name = u.Name, Email = u.Email, Role = u.Role.ToString(), Status = u.Status.ToString(), LastLoginAt = u.LastLoginAt, FailedLoginCount = u.FailedLoginCount,
     };
 }

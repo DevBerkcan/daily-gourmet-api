@@ -25,4 +25,17 @@ public class AuthController(AuthHandler handler) : ControllerBase
         var result = await handler.GetCurrentUserAsync(ct);
         return Ok(ApiResponse<CurrentUserDto>.Ok(result));
     }
+
+    [HttpGet("invitations/{token}")]
+    [AllowAnonymous]
+    public async Task<ActionResult<ApiResponse<InvitationDetailsDto>>> GetInvitation(string token, CancellationToken ct) =>
+        Ok(ApiResponse<InvitationDetailsDto>.Ok(await handler.GetInvitationAsync(token, ct)));
+
+    [HttpPost("invitations/{token}/accept")]
+    [AllowAnonymous]
+    public async Task<ActionResult<ApiResponse>> AcceptInvitation(string token, [FromBody] AcceptInvitationDto dto, CancellationToken ct)
+    {
+        await handler.AcceptInvitationAsync(token, dto.Password, ct);
+        return Ok(ApiResponse.Ok());
+    }
 }

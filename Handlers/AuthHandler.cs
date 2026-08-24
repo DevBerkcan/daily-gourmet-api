@@ -61,6 +61,39 @@ public class AuthHandler(
         return await BuildCurrentUserDtoAsync(user, ct);
     }
 
+    public async Task<InvitationDetailsDto> GetInvitationAsync(string token, CancellationToken ct = default)
+    {
+        var user = await FindByValidInvitationTokenAsync(token, ct);
+        return new InvitationDetailsDto { Name = user.Name, Email = user.Email };
+    }
+
+    /// <summary>Sets the initial (or reset) password for an invited user and activates the account.
+    /// Used by the public "set your password" link sent from UserManagementHandler.InviteAsync,
+    /// SuperAdminHandler.CreateUserAsync/CreateTenantAsync — every path that creates a login-capable
+    /// user starts them off in UserStatus.EINGELADEN with an InvitationToken, so this is the single
+    /// place that turns that into an active account.</summary>
+    public async Task AcceptInvitationAsync(string token, string password, CancellationToken ct = default)
+    {
+        var user = await FindByValidInvitationTokenAsync(token, ct);
+        user.PasswordHash = passwordHasher.HashPassword(user, password);
+        user.Status = UserStatus.AKTIV;
+        user.InvitationToken = null;
+        user.InvitationExpiresAt = null;
+        user.FailedLoginCount = 0;
+        user.LockedUntil = null;
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task<User> FindByValidInvitationTokenAsync(string token, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(token)) throw new ForbiddenException("Ungültiger Einladungslink.");
+        var user = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.InvitationToken == token, ct)
+            ?? throw new ForbiddenException("Ungültiger Einladungslink.");
+        if (user.InvitationExpiresAt is null || user.InvitationExpiresAt < DateTime.UtcNow)
+            throw new ConflictException("Dieser Einladungslink ist abgelaufen. Bitten Sie Ihren Administrator um eine neue Einladung.");
+        return user;
+    }
+
     private async Task<CurrentUserDto> BuildCurrentUserDtoAsync(User user, CancellationToken ct)
     {
         string? tenantName = null;

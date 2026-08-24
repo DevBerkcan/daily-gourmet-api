@@ -29,3 +29,17 @@ public class CurrentUserDto
     public string Role { get; set; } = string.Empty;
     public bool ActiveSupportSession { get; set; }
 }
+
+/// <summary>Shown on the public "set your password" page before the user submits one — lets the
+/// frontend greet them by name without requiring a login.</summary>
+public class InvitationDetailsDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+}
+
+public class AcceptInvitationDto
+{
+    [Required, MinLength(8, ErrorMessage = "Das Passwort muss mindestens 8 Zeichen lang sein.")]
+    public string Password { get; set; } = string.Empty;
+}

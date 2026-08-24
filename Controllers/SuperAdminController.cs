@@ -66,6 +66,10 @@ public class SuperAdminController(SuperAdminHandler handler, AuditLogHandler aud
         [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default) =>
         Ok(ApiResponse<PagedResult<UserDto>>.Ok(await handler.GlobalUsersAsync(tenantId, role, status, page, pageSize, ct)));
 
+    [HttpPost("users")]
+    public async Task<ActionResult<ApiResponse<UserDto>>> CreateUser([FromBody] CreateUserDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<UserDto>.Ok(await handler.CreateUserAsync(dto, ct)));
+
     [HttpGet("feature-flags")]
     public async Task<ActionResult<ApiResponse<List<FeatureFlagDto>>>> ListFeatureFlags(CancellationToken ct) =>
         Ok(ApiResponse<List<FeatureFlagDto>>.Ok(await handler.ListFeatureFlagsAsync(ct)));

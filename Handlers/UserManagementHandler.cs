@@ -4,13 +4,15 @@ using DailyGourmet.Api.Models.DTOs;
 using DailyGourmet.Api.Models.DTOs.Users;
 using DailyGourmet.Api.Models.Entities;
 using DailyGourmet.Api.Models.Enums;
+using DailyGourmet.Api.Options;
 using DailyGourmet.Api.Repositories.Interfaces;
 using DailyGourmet.Api.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class UserManagementHandler(IRepository<User> users, ITenantContext tenantContext, IEmailService email)
+public class UserManagementHandler(IRepository<User> users, ITenantContext tenantContext, IEmailService email, IOptions<AppOptions> appOptions)
 {
     public async Task<PagedResult<UserDto>> ListAsync(int page, int pageSize, CancellationToken ct = default)
     {
@@ -88,10 +90,18 @@ public class UserManagementHandler(IRepository<User> users, ITenantContext tenan
         await SendInviteEmailAsync(user);
     }
 
-    private async Task SendInviteEmailAsync(User user) =>
-        await email.SendAsync(user.Email, user.Name, "Einladung zu Daily Gourmet",
-            $"<p>Sie wurden zu Daily Gourmet eingeladen. <a href=\"https://app.example/accept-invite/{user.InvitationToken}\">Einladung annehmen</a></p>",
-            $"Sie wurden zu Daily Gourmet eingeladen. Link: https://app.example/accept-invite/{user.InvitationToken}");
+    private async Task SendInviteEmailAsync(User user)
+    {
+        var baseUrl = appOptions.Value.PublicBaseUrl.TrimEnd('/');
+        var acceptUrl = $"{baseUrl}/accept-invite/{user.InvitationToken}";
+        var html = $"""
+            <p>Sie wurden zu Daily Gourmet eingeladen. Klicken Sie auf den folgenden Link, um Ihr Passwort festzulegen und Ihr Konto zu aktivieren:</p>
+            <p><a href="{acceptUrl}">Konto aktivieren</a></p>
+            <p>Der Link ist 72 Stunden gültig.</p>
+            """;
+        var text = $"Sie wurden zu Daily Gourmet eingeladen. Passwort festlegen: {acceptUrl}\nDer Link ist 72 Stunden gültig.";
+        await email.SendAsync(user.Email, user.Name, "Einladung zu Daily Gourmet", html, text);
+    }
 
     private static UserDto ToDto(User u) => new()
     {
