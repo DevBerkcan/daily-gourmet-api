@@ -52,8 +52,8 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
         var order = await db.Orders.Include(o => o.Items).FirstOrDefaultAsync(o => o.FacilityId == facilityId && o.MealPlanId == dto.MealPlanId, ct);
         var deadline = await ComputeDeadlineAsync(facilityId, dto.Items, ct);
 
-        if (dto.Submit && DateTime.UtcNow > deadline)
-            throw new ConflictException("Die Bestellfrist ist abgelaufen.");
+        //if (dto.Submit && DateTime.UtcNow > deadline)
+        //    //throw new ConflictException("Die Bestellfrist ist abgelaufen.");
 
         if (dto.Submit)
             await EnsureEverySlotDecidedAsync(facilityId, dto.MealPlanId, dto.Items, ct);

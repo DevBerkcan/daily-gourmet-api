@@ -74,3 +74,20 @@ public class SaveFacilityClosureDto
     [Required] public DateOnly EndDate { get; set; }
     [MaxLength(500)] public string? Note { get; set; }
 }
+
+/// <summary>Portal-Selbstbedienung: bewusst nur Kontaktdaten — Preise, Tour, Standort und Status
+/// bleiben Verwaltungssache und sind hier nicht änderbar.</summary>
+public class UpdatePortalFacilityDto
+{
+    [MaxLength(300)]
+    public string Address { get; set; } = string.Empty;
+
+    [MaxLength(200)]
+    public string ContactPerson { get; set; } = string.Empty;
+
+    [EmailAddress, MaxLength(256)]
+    public string Email { get; set; } = string.Empty;
+
+    [MaxLength(50)]
+    public string Phone { get; set; } = string.Empty;
+}

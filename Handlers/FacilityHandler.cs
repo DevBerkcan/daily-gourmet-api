@@ -104,6 +104,24 @@ public class FacilityHandler(
         return ToDto(facility);
     }
 
+    /// <summary>Portal-Selbstbedienung: Einrichtung pflegt ihre eigenen Kontaktdaten — Preise, Tour,
+    /// Standort und Status bleiben unangetastet (siehe <see cref="UpdatePortalFacilityDto"/>).</summary>
+    public async Task<FacilityDto> UpdateOwnContactAsync(Guid id, UpdatePortalFacilityDto dto, CancellationToken ct = default)
+    {
+        var facility = await facilities.Query().Include(f => f.Location).FirstOrDefaultAsync(f => f.Id == id, ct)
+            ?? throw new NotFoundException(nameof(Facility), id);
+
+        facility.Address = dto.Address.Trim();
+        facility.ContactPerson = dto.ContactPerson.Trim();
+        facility.Email = dto.Email.Trim();
+        facility.Phone = dto.Phone.Trim();
+
+        facilities.Update(facility);
+        await facilities.SaveChangesAsync(ct);
+
+        return ToDto(facility);
+    }
+
     private static FacilityDto ToDto(Facility f) => new()
     {
         Id = f.Id,

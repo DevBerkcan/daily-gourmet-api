@@ -89,3 +89,15 @@ public class PortalFacilityClosuresController(FacilityClosureHandler closureHand
         return Ok(ApiResponse.Ok());
     }
 }
+
+[ApiController]
+[Route("api/portal/facility")]
+[Authorize(Roles = "FACILITY_ADMIN,FACILITY_USER")]
+public class PortalFacilityController(FacilityHandler handler, ITenantContext tenantContext) : ControllerBase
+{
+    private Guid OwnFacilityId => tenantContext.FacilityId ?? throw new ForbiddenException("Kein Einrichtungskontext vorhanden.");
+
+    [HttpPut]
+    public async Task<ActionResult<ApiResponse<FacilityDto>>> Update([FromBody] UpdatePortalFacilityDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<FacilityDto>.Ok(await handler.UpdateOwnContactAsync(OwnFacilityId, dto, ct)));
+}
