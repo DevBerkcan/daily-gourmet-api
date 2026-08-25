@@ -62,11 +62,7 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
             Regional = dto.Regional,
             Active = true,
             Source = IngredientSource.Manuell,
-            Nutrition = new IngredientNutrition
-            {
-                Kcal = dto.Nutrition.Kcal, ProteinG = dto.Nutrition.ProteinG, FatG = dto.Nutrition.FatG,
-                CarbsG = dto.Nutrition.CarbsG, SugarG = dto.Nutrition.SugarG, SaltG = dto.Nutrition.SaltG,
-            },
+            Nutrition = ToEntityNutrition(dto.Nutrition),
         };
         db.Ingredients.Add(ingredient);
         foreach (var allergenId in dto.AllergenIds.Distinct())
@@ -95,11 +91,7 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
         ingredient.Vegan = dto.Vegan;
         ingredient.Bio = dto.Bio;
         ingredient.Regional = dto.Regional;
-        ingredient.Nutrition = new IngredientNutrition
-        {
-            Kcal = dto.Nutrition.Kcal, ProteinG = dto.Nutrition.ProteinG, FatG = dto.Nutrition.FatG,
-            CarbsG = dto.Nutrition.CarbsG, SugarG = dto.Nutrition.SugarG, SaltG = dto.Nutrition.SaltG,
-        };
+        ingredient.Nutrition = ToEntityNutrition(dto.Nutrition);
         // A human just edited this ingredient — protect it from a future Rezeptrechner sync ever
         // overwriting these changes again, regardless of where the row originally came from.
         ingredient.IsManuallyEdited = true;
@@ -173,15 +165,7 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
                 ingredient.PurchaseUnit = row.PurchaseUnit;
                 ingredient.ConversionFactor = row.ConversionFactor;
                 ingredient.PurchasePrice = row.PurchasePrice;
-                if (row.Nutrition is { } n)
-                {
-                    ingredient.Nutrition = new IngredientNutrition
-                    {
-                        Kcal = n.Kcal, ProteinG = n.ProteinG, FatG = n.FatG,
-                        CarbsG = n.CarbsG, SugarG = n.SugarG, SaltG = n.SaltG,
-                        Source = NutritionSource.Manuell,
-                    };
-                }
+                if (row.Nutrition is { } n) ingredient.Nutrition = ToEntityNutrition(n);
                 ingredient.LastSyncedAt = now;
                 ingredient.UpdatedAt = now;
                 result.Updated++;
@@ -205,17 +189,38 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
                     IsManuallyEdited = false,
                     LastSyncedAt = now,
                     CreatedAt = now,
-                    Nutrition = row.Nutrition is { } newNutrition
-                        ? new IngredientNutrition
-                        {
-                            Kcal = newNutrition.Kcal, ProteinG = newNutrition.ProteinG, FatG = newNutrition.FatG,
-                            CarbsG = newNutrition.CarbsG, SugarG = newNutrition.SugarG, SaltG = newNutrition.SaltG,
-                            Source = NutritionSource.Manuell,
-                        }
-                        : new IngredientNutrition(),
+                    Nutrition = row.Nutrition is { } newNutrition ? ToEntityNutrition(newNutrition) : new IngredientNutrition(),
                 });
                 result.Added++;
             }
+        }
+
+        await db.SaveChangesAsync(ct);
+        return result;
+    }
+
+    /// <summary>Applies nutrition matched client-side against an external dataset (currently the
+    /// Bundeslebensmittelschlüssel) to already-existing ingredients, identified directly by
+    /// IngredientId rather than the Rezeptrechner's ExternalRefId sync key — this is a separate
+    /// source from the Rezeptrechner import, so it needs its own match path. Never touches a
+    /// manually-edited ingredient, same protection as SyncAsync.</summary>
+    public async Task<ApplyNutritionResultDto> ApplyExternalNutritionAsync(List<ApplyIngredientNutritionRowDto> rows, NutritionSource source, CancellationToken ct = default)
+    {
+        var ids = rows.Select(r => r.IngredientId).ToList();
+        var ingredients = await db.Ingredients.Where(i => ids.Contains(i.Id)).ToDictionaryAsync(i => i.Id, ct);
+
+        var result = new ApplyNutritionResultDto();
+        var now = DateTime.UtcNow;
+        foreach (var row in rows)
+        {
+            if (!ingredients.TryGetValue(row.IngredientId, out var ingredient)) { result.SkippedNotFound++; continue; }
+            if (ingredient.IsManuallyEdited) { result.SkippedManuallyEdited++; continue; }
+
+            ingredient.Nutrition = ToEntityNutrition(row.Nutrition);
+            ingredient.Nutrition.Source = source;
+            ingredient.LastSyncedAt = now;
+            ingredient.UpdatedAt = now;
+            result.Applied++;
         }
 
         await db.SaveChangesAsync(ct);
@@ -327,8 +332,10 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
             CheapestPrice = cheapest?.Price,
             Nutrition = new NutritionDto
             {
-                Kcal = i.Nutrition.Kcal, ProteinG = i.Nutrition.ProteinG, FatG = i.Nutrition.FatG,
-                CarbsG = i.Nutrition.CarbsG, SugarG = i.Nutrition.SugarG, SaltG = i.Nutrition.SaltG,
+                Kcal = i.Nutrition.Kcal, Kj = i.Nutrition.Kj, ProteinG = i.Nutrition.ProteinG,
+                FatG = i.Nutrition.FatG, SaturatedFatG = i.Nutrition.SaturatedFatG,
+                CarbsG = i.Nutrition.CarbsG, SugarG = i.Nutrition.SugarG, FiberG = i.Nutrition.FiberG,
+                SaltG = i.Nutrition.SaltG, AlcoholG = i.Nutrition.AlcoholG,
                 Source = i.Nutrition.Source.ToString(),
             },
             AllergenNames = i.Allergens.Select(a => a.Allergen?.Name ?? string.Empty).Where(n => n != string.Empty).ToArray(),
@@ -336,4 +343,11 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
             Additives = i.Additives.Select(a => a.Text).ToArray(),
         };
     }
+
+    private static IngredientNutrition ToEntityNutrition(NutritionDto dto) => new()
+    {
+        Kcal = dto.Kcal, Kj = dto.Kj, ProteinG = dto.ProteinG, FatG = dto.FatG, SaturatedFatG = dto.SaturatedFatG,
+        CarbsG = dto.CarbsG, SugarG = dto.SugarG, FiberG = dto.FiberG, SaltG = dto.SaltG, AlcoholG = dto.AlcoholG,
+        Source = NutritionSource.Manuell,
+    };
 }

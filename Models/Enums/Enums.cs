@@ -67,7 +67,10 @@ public enum NutritionSource
 {
     OpenFoodFacts,
     Usda,
-    Manuell
+    Manuell,
+    /// <summary>Bundeslebensmittelschlüssel (Max Rubner-Institut) — since Dec 2025 free under CC BY 4.0.
+    /// See IngredientHandler.ApplyExternalNutritionAsync.</summary>
+    Bls
 }
 
 /// <summary>Where an ingredient row originated — drives the sync-without-overwrite rule (see

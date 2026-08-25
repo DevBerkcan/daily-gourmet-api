@@ -8,13 +8,21 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DailyGourmet.Api.Handlers;
 
+/// <summary>
+/// Unternehmensprofil und Einstellungen eines Mandanten werden ausschließlich von Daily Gourmet
+/// (SUPER_ADMIN) gepflegt, nicht vom Mandanten selbst — siehe Autorisierung in TenantsController
+/// bzw. SuperAdminController. Die Kernlogik ist hier tenantId-parametrisiert, damit beide Seiten
+/// (Self-Service-Anzeige "current" und Super-Admin-Pflege per Id) dieselbe Implementierung nutzen.
+/// </summary>
 public class TenantHandler(DailyGourmetDbContext db, ITenantSettingsRepository settingsRepo, ITenantContext tenantContext)
 {
     private Guid CurrentTenantId => tenantContext.TenantId ?? throw new ValidationException("Kein Mandantenkontext vorhanden.");
 
-    public async Task<TenantDto> GetCurrentAsync(CancellationToken ct = default)
+    public Task<TenantDto> GetCurrentAsync(CancellationToken ct = default) => GetAsync(CurrentTenantId, ct);
+
+    public async Task<TenantDto> GetAsync(Guid tenantId, CancellationToken ct = default)
     {
-        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Id == CurrentTenantId, ct) ?? throw new NotFoundException(nameof(Tenant), CurrentTenantId);
+        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId, ct) ?? throw new NotFoundException(nameof(Tenant), tenantId);
         return new TenantDto
         {
             Id = tenant.Id, Name = tenant.Name, Status = tenant.Status.ToString(), MainContactName = tenant.MainContactName, MainContactEmail = tenant.MainContactEmail, CreatedAt = tenant.CreatedAt,
@@ -23,42 +31,52 @@ public class TenantHandler(DailyGourmetDbContext db, ITenantSettingsRepository s
         };
     }
 
-    public async Task<TenantDto> UpdateCurrentAsync(UpdateTenantDto dto, CancellationToken ct = default)
+    public Task<TenantDto> UpdateCurrentAsync(UpdateTenantDto dto, CancellationToken ct = default) => UpdateAsync(CurrentTenantId, dto, ct);
+
+    public async Task<TenantDto> UpdateAsync(Guid tenantId, UpdateTenantDto dto, CancellationToken ct = default)
     {
-        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Id == CurrentTenantId, ct) ?? throw new NotFoundException(nameof(Tenant), CurrentTenantId);
+        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId, ct) ?? throw new NotFoundException(nameof(Tenant), tenantId);
         tenant.Name = dto.Name.Trim();
         tenant.MainContactName = dto.MainContactName;
         tenant.MainContactEmail = dto.MainContactEmail;
         tenant.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
-        return await GetCurrentAsync(ct);
+        return await GetAsync(tenantId, ct);
     }
 
-    public async Task<TenantProfileDto> GetProfileAsync(CancellationToken ct = default)
+    public Task<TenantProfileDto> GetProfileAsync(CancellationToken ct = default) => GetProfileAsync(CurrentTenantId, ct);
+
+    public async Task<TenantProfileDto> GetProfileAsync(Guid tenantId, CancellationToken ct = default)
     {
-        var profile = await settingsRepo.GetProfileAsync(CurrentTenantId, ct) ?? throw new NotFoundException(nameof(TenantProfile), CurrentTenantId);
+        var profile = await settingsRepo.GetProfileAsync(tenantId, ct) ?? throw new NotFoundException(nameof(TenantProfile), tenantId);
         return ToProfileDto(profile);
     }
 
-    public async Task<TenantProfileDto> UpdateProfileAsync(TenantProfileDto dto, CancellationToken ct = default)
+    public Task<TenantProfileDto> UpdateProfileAsync(TenantProfileDto dto, CancellationToken ct = default) => UpdateProfileAsync(CurrentTenantId, dto, ct);
+
+    public async Task<TenantProfileDto> UpdateProfileAsync(Guid tenantId, TenantProfileDto dto, CancellationToken ct = default)
     {
-        var profile = await settingsRepo.GetProfileAsync(CurrentTenantId, ct) ?? throw new NotFoundException(nameof(TenantProfile), CurrentTenantId);
+        var profile = await settingsRepo.GetProfileAsync(tenantId, ct) ?? throw new NotFoundException(nameof(TenantProfile), tenantId);
         profile.VatId = dto.VatId; profile.Street = dto.Street; profile.PostalCode = dto.PostalCode; profile.City = dto.City;
         profile.Phone = dto.Phone; profile.Email = dto.Email; profile.Timezone = dto.Timezone; profile.Currency = dto.Currency; profile.LogoUrl = dto.LogoUrl;
         await settingsRepo.SaveChangesAsync(ct);
         return ToProfileDto(profile);
     }
 
-    public async Task<TenantSettingsDto> GetSettingsAsync(CancellationToken ct = default)
+    public Task<TenantSettingsDto> GetSettingsAsync(CancellationToken ct = default) => GetSettingsAsync(CurrentTenantId, ct);
+
+    public async Task<TenantSettingsDto> GetSettingsAsync(Guid tenantId, CancellationToken ct = default)
     {
-        var settings = await settingsRepo.GetAsync(CurrentTenantId, ct) ?? throw new NotFoundException(nameof(TenantSettings), CurrentTenantId);
-        var notifications = await db.TenantNotificationSettings.Where(n => n.TenantId == CurrentTenantId).ToListAsync(ct);
+        var settings = await settingsRepo.GetAsync(tenantId, ct) ?? throw new NotFoundException(nameof(TenantSettings), tenantId);
+        var notifications = await db.TenantNotificationSettings.Where(n => n.TenantId == tenantId).ToListAsync(ct);
         return ToSettingsDto(settings, notifications);
     }
 
-    public async Task<TenantSettingsDto> UpdateSettingsAsync(TenantSettingsDto dto, CancellationToken ct = default)
+    public Task<TenantSettingsDto> UpdateSettingsAsync(TenantSettingsDto dto, CancellationToken ct = default) => UpdateSettingsAsync(CurrentTenantId, dto, ct);
+
+    public async Task<TenantSettingsDto> UpdateSettingsAsync(Guid tenantId, TenantSettingsDto dto, CancellationToken ct = default)
     {
-        var settings = await settingsRepo.GetAsync(CurrentTenantId, ct) ?? throw new NotFoundException(nameof(TenantSettings), CurrentTenantId);
+        var settings = await settingsRepo.GetAsync(tenantId, ct) ?? throw new NotFoundException(nameof(TenantSettings), tenantId);
         settings.DefaultOrderDeadlineOffsetDays = dto.DefaultOrderDeadlineOffsetDays;
         settings.DefaultOrderDeadlineTime = dto.DefaultOrderDeadlineTime;
         settings.ExcludeWeekendsFromDeadline = dto.ExcludeWeekendsFromDeadline;
@@ -69,18 +87,18 @@ public class TenantHandler(DailyGourmetDbContext db, ITenantSettingsRepository s
         settings.RouteNumberPrefix = dto.RouteNumberPrefix;
         settings.SameDayAdjustmentDeadlineTime = dto.SameDayAdjustmentDeadlineTime;
 
-        var existing = await db.TenantNotificationSettings.Where(n => n.TenantId == CurrentTenantId).ToListAsync(ct);
+        var existing = await db.TenantNotificationSettings.Where(n => n.TenantId == tenantId).ToListAsync(ct);
         foreach (var item in dto.NotificationSettings)
         {
             var row = existing.FirstOrDefault(n => n.EventKey == item.EventKey);
             if (row is null)
-                db.TenantNotificationSettings.Add(new TenantNotificationSetting { Id = Guid.NewGuid(), TenantId = CurrentTenantId, EventKey = item.EventKey, Enabled = item.Enabled, CreatedAt = DateTime.UtcNow });
+                db.TenantNotificationSettings.Add(new TenantNotificationSetting { Id = Guid.NewGuid(), TenantId = tenantId, EventKey = item.EventKey, Enabled = item.Enabled, CreatedAt = DateTime.UtcNow });
             else
                 row.Enabled = item.Enabled;
         }
 
         await settingsRepo.SaveChangesAsync(ct);
-        return await GetSettingsAsync(ct);
+        return await GetSettingsAsync(tenantId, ct);
     }
 
     private static TenantProfileDto ToProfileDto(TenantProfile p) => new()

@@ -58,6 +58,7 @@ public class RecipeDto
     public decimal? CoreTemperatureC { get; set; }
     public string? StorageNote { get; set; }
     public string? ShelfLifeAfterPrep { get; set; }
+    public decimal ReductionFactor { get; set; } = 1;
     public bool Active { get; set; }
     public int Version { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -70,7 +71,9 @@ public class RecipeDto
     public string[] ResolvedAdditives { get; set; } = [];
     public bool AdditivesAreOverridden { get; set; }
     public string? NutriScore { get; set; }
+    public string? NutriScoreCategory { get; set; }
     public bool NutritionIsAuthoritative { get; set; }
+    public string[] NutritionClaims { get; set; } = [];
     public Guid[] TargetGroupIds { get; set; } = [];
     public string[] TargetGroupNames { get; set; } = [];
 }
@@ -103,6 +106,7 @@ public class SaveRecipeDto
     public decimal? CoreTemperatureC { get; set; }
     public string? StorageNote { get; set; }
     public string? ShelfLifeAfterPrep { get; set; }
+    [Range(0.01, 3)] public decimal ReductionFactor { get; set; } = 1;
     public string[] PrepSteps { get; set; } = [];
     public List<SaveRecipeIngredientDto> Ingredients { get; set; } = [];
     public Guid[] TargetGroupIds { get; set; } = [];
@@ -123,6 +127,63 @@ public class RecipeScaleResultDto
     public List<RecipeScaleIngredientDto> Ingredients { get; set; } = [];
 }
 
+// ---- Nährwerte-Detailansicht (siehe RecipeHandler.GetNutritionDetailAsync) ----
+
+/// <summary>Ein Zutaten-Zeile in der Nährwerte-Detailansicht, mit den Nährwerten dieser Zutat
+/// hochgerechnet auf ihre Menge im Rezept. HasNutritionData ist false, solange für diese Zutat noch
+/// keine echten Nährwerte hinterlegt sind (Rezeptrechner-Exporte liefern nur je Rezept, nicht je
+/// Rohzutat — s. Kommentar an RecipeHandler.ImportFromRezeptrechnerAsync) — die Kcal-Spalten zeigen
+/// dann 0, nicht weil die Zutat keine Kalorien hätte, sondern weil der Wert schlicht noch fehlt.</summary>
+public class RecipeNutritionIngredientRowDto
+{
+    public Guid IngredientId { get; set; }
+    public string IngredientName { get; set; } = string.Empty;
+    public decimal Quantity { get; set; }
+    public string Unit { get; set; } = string.Empty;
+    public decimal? WeightG { get; set; }
+    public bool HasNutritionData { get; set; }
+    public RecipeNutritionDto Nutrition { get; set; } = new();
+}
+
+/// <summary>Diabetiker-Austauscheinheiten — Standardformeln der deutschen Ernährungsberatung:
+/// BE = Kohlenhydrate(g)/12, KE = Kohlenhydrate(g)/10, FPE = (Fett(g)×9 + Eiweiß(g)×4)/100.</summary>
+public class DiabeticUnitsDto
+{
+    public decimal Be { get; set; }
+    public decimal Ke { get; set; }
+    public decimal Fpe { get; set; }
+}
+
+/// <summary>Eine nährwertbezogene Angabe (z. B. "Zuckerarm") mit dem tatsächlich gemessenen Wert und
+/// der EU-Schwelle (Verordnung (EG) Nr. 1924/2006, Anhang), sofern die Angabe einer der bekannten
+/// Regelclaims entspricht — sonst nur der Text ohne die drei weiteren Spalten (kein Rätselraten).</summary>
+public class NutritionClaimEvaluationDto
+{
+    public string ClaimText { get; set; } = string.Empty;
+    public string? MeasureLabel { get; set; }
+    public string? MeasuredValue { get; set; }
+    public string? Threshold { get; set; }
+}
+
+public class RecipeNutritionDetailDto
+{
+    public decimal RawWeightG { get; set; }
+    public decimal ReductionFactor { get; set; }
+    public decimal PreparedWeightG { get; set; }
+    public int StandardPortions { get; set; }
+    public decimal? PortionWeightG { get; set; }
+    public List<RecipeNutritionIngredientRowDto> Ingredients { get; set; } = [];
+    /// <summary>Autoritativ aus dem Rezeptimport, NICHT aus den Zutaten-Zeilen summiert — solange
+    /// nur ein Teil der Zutaten eigene Nährwerte hat, wäre eine Summe systematisch zu niedrig. Siehe
+    /// RecipeHandler.GetNutritionDetailAsync.</summary>
+    public RecipeNutritionDto? PerRecipe { get; set; }
+    public RecipeNutritionDto? PerPortion { get; set; }
+    public RecipeNutritionDto? Per100g { get; set; }
+    public DiabeticUnitsDto? DiabeticPerPortion { get; set; }
+    public DiabeticUnitsDto? DiabeticPer100g { get; set; }
+    public List<NutritionClaimEvaluationDto> ClaimEvaluations { get; set; } = [];
+}
+
 public class RecipeImportWarningDto
 {
     public string Reason { get; set; } = string.Empty;
@@ -137,5 +198,7 @@ public class RecipeImportResultDto
     public int IngredientsAdded { get; set; }
     public int IngredientsUpdated { get; set; }
     public int IngredientsSkippedManuallyEdited { get; set; }
+    public int IngredientsNutritionFromRecipeMatch { get; set; }
+    public int AllergensFromListApplied { get; set; }
     public List<RecipeImportWarningDto> Warnings { get; set; } = [];
 }

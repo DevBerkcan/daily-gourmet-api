@@ -71,11 +71,15 @@ public class IngredientConfiguration : IEntityTypeConfiguration<Ingredient>
         b.OwnsOne(i => i.Nutrition, n =>
         {
             n.Property(x => x.Kcal).HasPrecision(10, 2);
+            n.Property(x => x.Kj).HasPrecision(10, 2);
             n.Property(x => x.ProteinG).HasPrecision(10, 2);
             n.Property(x => x.FatG).HasPrecision(10, 2);
+            n.Property(x => x.SaturatedFatG).HasPrecision(10, 2);
             n.Property(x => x.CarbsG).HasPrecision(10, 2);
             n.Property(x => x.SugarG).HasPrecision(10, 2);
+            n.Property(x => x.FiberG).HasPrecision(10, 2);
             n.Property(x => x.SaltG).HasPrecision(10, 2);
+            n.Property(x => x.AlcoholG).HasPrecision(10, 2);
             n.Property(x => x.Source).HasConversion<string>().HasMaxLength(20);
         });
 
@@ -126,6 +130,7 @@ public class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
         b.Property(r => r.ShelfLifeAfterPrep).HasMaxLength(200);
         b.Property(r => r.NutriScore).HasConversion<string>().HasMaxLength(1);
         b.Property(r => r.NutriScoreCategory).HasMaxLength(100);
+        b.Property(r => r.ReductionFactor).HasPrecision(6, 3).HasDefaultValue(1m);
 
         b.OwnsOne(r => r.Nutrition, n =>
         {

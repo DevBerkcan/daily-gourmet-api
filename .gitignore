@@ -5,3 +5,4 @@ publish/
 *.PublishSettings
 *.pubxml
 appsettings.*.local.json
+.vs/

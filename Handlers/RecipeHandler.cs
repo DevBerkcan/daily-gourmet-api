@@ -23,6 +23,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
         .Include(r => r.Ingredients).ThenInclude(ri => ri.Ingredient).ThenInclude(i => i.SupplierPrices)
         .Include(r => r.AllergenOverrides)
         .Include(r => r.AdditiveOverrides)
+        .Include(r => r.NutritionClaims)
         .Include(r => r.TargetGroups).ThenInclude(tg => tg.TargetAudienceGroupEntity);
 
     public async Task<PagedResult<RecipeDto>> ListAsync(string? search, Guid? category, bool? active, int page, int pageSize, CancellationToken ct = default)
@@ -65,6 +66,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             CoreTemperatureC = dto.CoreTemperatureC,
             StorageNote = dto.StorageNote,
             ShelfLifeAfterPrep = dto.ShelfLifeAfterPrep,
+            ReductionFactor = dto.ReductionFactor,
             Active = dto.Active,
             Version = 1,
             CreatedAt = DateTime.UtcNow,
@@ -99,6 +101,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
         recipe.CoreTemperatureC = dto.CoreTemperatureC;
         recipe.StorageNote = dto.StorageNote;
         recipe.ShelfLifeAfterPrep = dto.ShelfLifeAfterPrep;
+        recipe.ReductionFactor = dto.ReductionFactor;
         recipe.Active = dto.Active;
         recipe.Version += 1;
         recipe.UpdatedAt = DateTime.UtcNow;
@@ -138,6 +141,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             CoreTemperatureC = source.CoreTemperatureC,
             StorageNote = source.StorageNote,
             ShelfLifeAfterPrep = source.ShelfLifeAfterPrep,
+            ReductionFactor = source.ReductionFactor,
             Active = true,
             Version = 1,
             CreatedAt = DateTime.UtcNow,
@@ -225,13 +229,21 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
         }
     }
 
-    public async Task<RecipeImportResultDto> ImportFromRezeptrechnerAsync(Stream zutatenMengenCsv, Stream artikeldatenCsv, CancellationToken ct = default)
+    public async Task<RecipeImportResultDto> ImportFromRezeptrechnerAsync(Stream zutatenMengenCsv, Stream artikeldatenCsv, Stream? allergeneListeCsv = null, CancellationToken ct = default)
     {
         var tenantId = tenantContext.TenantId!.Value;
         var result = new RecipeImportResultDto();
 
         var zutatenRows = RezeptrechnerCsvParser.ParseZutatenMengen(zutatenMengenCsv);
         var artikelRows = RezeptrechnerCsvParser.ParseArtikeldaten(artikeldatenCsv);
+        // Optional, structured allergen matrix — far more precise than Artikeldaten's free-text
+        // "Allergene" column (e.g. distinguishes "Gluten/ Weizen" from plain "Gluten"), so it takes
+        // priority per recipe when supplied; recipes missing from it fall back to the free text.
+        var allergenByRecipe = allergeneListeCsv is null
+            ? new Dictionary<string, RezeptrechnerAllergenZeile>(StringComparer.OrdinalIgnoreCase)
+            : RezeptrechnerCsvParser.ParseAllergeneListe(allergeneListeCsv)
+                .GroupBy(a => a.RecipeName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
         // ---- Step 1: sync every raw ingredient referenced by a recipe line (reuses the existing,
         // manual-edit-protecting Ingredient sync — see IngredientHandler.SyncAsync) ----
@@ -279,6 +291,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             .ToDictionaryAsync(r => r.Name, StringComparer.OrdinalIgnoreCase, ct);
 
         var now = DateTime.UtcNow;
+        var recipeNutritionByName = new Dictionary<string, RecipeNutrition>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var recipeName in allRecipeNames)
         {
@@ -306,6 +319,18 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             if (!ingredientLines.Any() && artikel is not null)
                 result.Warnings.Add(new RecipeImportWarningDto { Reason = $"Rezept „{recipeName}“: keine Zutatenzeilen gefunden — Rezept ohne Zutaten angelegt." });
 
+            // Reduktionsfaktor = Gewicht zubereitet (GewichtPortion_g × Portionen, aus Kennzeichnung) ÷
+            // Rohgewicht (Summe der Zutatenmengen, aus Zutaten-Mengen) — keine der beiden Exportdateien
+            // liefert den Faktor direkt, aber beide Größen, aus denen er sich exakt herleiten lässt.
+            // Verifiziert am Kundenbeispiel "Cevapcici vom Geflügel…": 323,8g × 10 ÷ 4625g = 0,700 —
+            // exakt der Wert, den der Rezeptrechner selbst für dieses Rezept anzeigt. Ein Ergebnis
+            // außerhalb eines plausiblen Bereichs (z. B. weil nur Stück-Zutaten ohne Gewicht vorliegen)
+            // wird verworfen, statt einen falschen Wert zu speichern.
+            var rawWeightG = ingredientLines.Sum(l => l.Quantity) * 1000;
+            var preparedWeightG = artikel?.PortionWeightG is { } pw ? pw * standardPortions : (decimal?)null;
+            var computedReductionFactor = preparedWeightG is { } prepared && rawWeightG > 0 ? decimal.Round(prepared / rawWeightG, 3) : (decimal?)null;
+            if (computedReductionFactor is < 0.1m or > 3m) computedReductionFactor = null;
+
             Recipe recipe;
             if (existingRecipes.TryGetValue(recipeName, out var found))
             {
@@ -322,6 +347,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
                 recipe.Nutrition = nutrition ?? recipe.Nutrition;
                 recipe.NutriScore = nutriScore ?? recipe.NutriScore;
                 recipe.NutriScoreCategory = artikel?.NutriScoreCategory ?? recipe.NutriScoreCategory;
+                recipe.ReductionFactor = computedReductionFactor ?? recipe.ReductionFactor;
                 recipe.Version += 1;
                 recipe.UpdatedAt = now;
 
@@ -343,10 +369,12 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
                     GlutenFree = parsedCategory.GlutenFree, LactoseFree = parsedCategory.LactoseFree,
                     Active = true, Version = 1, CreatedAt = now,
                     Nutrition = nutrition, NutriScore = nutriScore, NutriScoreCategory = artikel?.NutriScoreCategory,
+                    ReductionFactor = computedReductionFactor ?? 1m,
                 };
                 db.Recipes.Add(recipe);
                 result.RecipesAdded++;
             }
+            if (recipe.Nutrition is { } recipeNutrition) recipeNutritionByName[recipeName] = recipeNutrition;
 
             foreach (var line in ingredientLines)
             {
@@ -358,12 +386,42 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
                 db.RecipeIngredients.Add(new RecipeIngredient { Id = Guid.NewGuid(), RecipeId = recipe.Id, IngredientId = ingredientId, Quantity = line.Quantity, Unit = Unit.kg, CreatedAt = now });
             }
 
-            foreach (var text in SplitTags(artikel?.AllergensText))
+            var allergenTexts = allergenByRecipe.TryGetValue(recipeName, out var allergenRow)
+                ? allergenRow.MarkedAllergens
+                : SplitTags(artikel?.AllergensText);
+            if (allergenRow is not null) result.AllergensFromListApplied++;
+            foreach (var text in allergenTexts)
                 db.RecipeAllergenOverrides.Add(new RecipeAllergenOverride { Id = Guid.NewGuid(), RecipeId = recipe.Id, Text = text, CreatedAt = now });
             foreach (var text in SplitTags(artikel?.AdditivesText))
                 db.RecipeAdditiveOverrides.Add(new RecipeAdditiveOverride { Id = Guid.NewGuid(), RecipeId = recipe.Id, Text = text, CreatedAt = now });
             foreach (var text in SplitTags(artikel?.NutritionClaimsText))
                 db.RecipeNutritionClaims.Add(new RecipeNutritionClaim { Id = Guid.NewGuid(), RecipeId = recipe.Id, Text = text, CreatedAt = now });
+        }
+
+        // ---- Step 3: backfill nutrition for ingredients that are themselves a sub-recipe used as an
+        // ingredient elsewhere (e.g. "Bratkartoffeln Grundrezept" appearing inside another dish) —
+        // the Rezeptrechner exports never carry true per-ingredient nutrition for raw commodities, but
+        // for these the matching recipe's own per-100g figures (just computed above) are the real
+        // thing, not a guess. Never touches a manually-edited ingredient. ----
+        var ingredientsByName = (await db.Ingredients
+            .Where(i => i.TenantId == tenantId && !i.IsManuallyEdited)
+            .ToListAsync(ct))
+            .GroupBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, recipeNutrition) in recipeNutritionByName)
+        {
+            if (!ingredientsByName.TryGetValue(name, out var ingredient)) continue;
+            ingredient.Nutrition = new IngredientNutrition
+            {
+                Kcal = recipeNutrition.Kcal, Kj = recipeNutrition.Kj, ProteinG = recipeNutrition.ProteinG,
+                FatG = recipeNutrition.FatG, SaturatedFatG = recipeNutrition.SaturatedFatG,
+                CarbsG = recipeNutrition.CarbsG, SugarG = recipeNutrition.SugarG, FiberG = recipeNutrition.FiberG,
+                SaltG = recipeNutrition.SaltG, AlcoholG = recipeNutrition.AlcoholG,
+                Source = NutritionSource.Manuell,
+            };
+            ingredient.LastSyncedAt = now;
+            ingredient.UpdatedAt = now;
+            result.IngredientsNutritionFromRecipeMatch++;
         }
 
         await db.SaveChangesAsync(ct);
@@ -412,26 +470,154 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
         };
     }
 
-    public async Task<byte[]> RenderLabelAsync(Guid id, CancellationToken ct = default)
+    /// <summary>Grams a RecipeIngredient's quantity converts to — kg/l are treated as 1000 g resp.
+    /// 1000 ml (matching the existing per-ingredient kcal estimate already in the frontend, see
+    /// rezept-detail.tsx's inline `faktor` calc), g/ml pass straight through. Stück has no reliable
+    /// weight without a per-ingredient conversion this schema doesn't carry — null, so the caller can
+    /// show a dash instead of a made-up number.</summary>
+    private static decimal? ToGrams(decimal quantity, Unit unit) => unit switch
+    {
+        Unit.kg or Unit.l => quantity * 1000,
+        Unit.g or Unit.ml => quantity,
+        _ => null,
+    };
+
+    private static DiabeticUnitsDto ToDiabeticUnits(RecipeNutritionDto n) => new()
+    {
+        Be = decimal.Round(n.CarbsG / 12m, 1),
+        Ke = decimal.Round(n.CarbsG / 10m, 1),
+        Fpe = decimal.Round((n.FatG * 9 + n.ProteinG * 4) / 100m, 1),
+    };
+
+    /// <summary>Backs the "Nährwerte ansehen" view — full per-ingredient breakdown plus the
+    /// recipe-level aggregates, diabetic exchange units and nutrition-claim thresholds. The
+    /// aggregates (PerPortion/PerRecipe/Per100g) are derived from the recipe's own authoritative
+    /// Recipe.Nutrition, never summed from the ingredient rows: most ingredients here still lack
+    /// their own real nutrition data (see comment on RecipeNutritionIngredientRowDto), so a sum would
+    /// systematically undercount. The ingredient table is shown alongside for transparency /
+    /// to make it obvious which ingredients still need real data — not as the source of truth.</summary>
+    public async Task<RecipeNutritionDetailDto> GetNutritionDetailAsync(Guid id, CancellationToken ct = default)
+    {
+        var recipe = await db.Recipes
+            .Include(r => r.Ingredients).ThenInclude(ri => ri.Ingredient)
+            .Include(r => r.NutritionClaims)
+            .FirstOrDefaultAsync(r => r.Id == id, ct) ?? throw new NotFoundException(nameof(Recipe), id);
+
+        var ingredientRows = recipe.Ingredients.Select(ri =>
+        {
+            var gramsNullable = ToGrams(ri.Quantity, ri.Unit);
+            var factor = (gramsNullable ?? 0) / 100m;
+            var n = ri.Ingredient.Nutrition;
+            var hasData = n.Kcal != 0 || n.ProteinG != 0 || n.FatG != 0 || n.CarbsG != 0 || n.SugarG != 0
+                || n.SaltG != 0 || n.FiberG != 0 || n.SaturatedFatG != 0 || n.AlcoholG != 0 || n.Kj != 0;
+            return new RecipeNutritionIngredientRowDto
+            {
+                IngredientId = ri.IngredientId,
+                IngredientName = ri.Ingredient.Name,
+                Quantity = ri.Quantity,
+                Unit = ri.Unit.ToString(),
+                WeightG = gramsNullable is { } g ? decimal.Round(g, 1) : null,
+                HasNutritionData = hasData,
+                Nutrition = new RecipeNutritionDto
+                {
+                    Kcal = decimal.Round(n.Kcal * factor, 2),
+                    Kj = decimal.Round(n.Kj * factor, 2),
+                    FatG = decimal.Round(n.FatG * factor, 2),
+                    SaturatedFatG = decimal.Round(n.SaturatedFatG * factor, 2),
+                    CarbsG = decimal.Round(n.CarbsG * factor, 2),
+                    SugarG = decimal.Round(n.SugarG * factor, 2),
+                    FiberG = decimal.Round(n.FiberG * factor, 2),
+                    ProteinG = decimal.Round(n.ProteinG * factor, 2),
+                    SaltG = decimal.Round(n.SaltG * factor, 2),
+                    AlcoholG = decimal.Round(n.AlcoholG * factor, 2),
+                },
+            };
+        }).ToList();
+
+        var rawWeightG = ingredientRows.Sum(r => r.WeightG ?? 0);
+        var preparedWeightG = rawWeightG * recipe.ReductionFactor;
+        var effectivePortionWeightG = recipe.PortionWeightG
+            ?? (recipe.StandardPortions > 0 && preparedWeightG > 0 ? preparedWeightG / recipe.StandardPortions : (decimal?)null);
+
+        RecipeNutritionDto? perPortion = null, perRecipe = null, per100g = null;
+        DiabeticUnitsDto? diabeticPortion = null, diabetic100g = null;
+        var claimEvaluations = new List<NutritionClaimEvaluationDto>();
+
+        if (recipe.Nutrition is { } nutrition)
+        {
+            per100g = new RecipeNutritionDto
+            {
+                Kcal = nutrition.Kcal, Kj = nutrition.Kj, FatG = nutrition.FatG, SaturatedFatG = nutrition.SaturatedFatG,
+                CarbsG = nutrition.CarbsG, SugarG = nutrition.SugarG, FiberG = nutrition.FiberG, ProteinG = nutrition.ProteinG,
+                SaltG = nutrition.SaltG, AlcoholG = nutrition.AlcoholG,
+            };
+            diabetic100g = ToDiabeticUnits(per100g);
+            claimEvaluations = recipe.NutritionClaims.Select(c => GermanNutritionClaims.Evaluate(c.Text, per100g)).ToList();
+
+            if (effectivePortionWeightG is { } portionWeight)
+            {
+                perPortion = ScaleNutritionToPortion(per100g, portionWeight);
+                diabeticPortion = ToDiabeticUnits(perPortion);
+                perRecipe = new RecipeNutritionDto
+                {
+                    Kcal = perPortion.Kcal * recipe.StandardPortions, Kj = perPortion.Kj * recipe.StandardPortions,
+                    FatG = perPortion.FatG * recipe.StandardPortions, SaturatedFatG = perPortion.SaturatedFatG * recipe.StandardPortions,
+                    CarbsG = perPortion.CarbsG * recipe.StandardPortions, SugarG = perPortion.SugarG * recipe.StandardPortions,
+                    FiberG = perPortion.FiberG * recipe.StandardPortions, ProteinG = perPortion.ProteinG * recipe.StandardPortions,
+                    SaltG = perPortion.SaltG * recipe.StandardPortions, AlcoholG = perPortion.AlcoholG * recipe.StandardPortions,
+                };
+            }
+        }
+
+        return new RecipeNutritionDetailDto
+        {
+            RawWeightG = decimal.Round(rawWeightG, 1),
+            ReductionFactor = recipe.ReductionFactor,
+            PreparedWeightG = decimal.Round(preparedWeightG, 1),
+            StandardPortions = recipe.StandardPortions,
+            PortionWeightG = effectivePortionWeightG is { } w ? decimal.Round(w, 1) : null,
+            Ingredients = ingredientRows,
+            PerRecipe = perRecipe,
+            PerPortion = perPortion,
+            Per100g = per100g,
+            DiabeticPerPortion = diabeticPortion,
+            DiabeticPer100g = diabetic100g,
+            ClaimEvaluations = claimEvaluations,
+        };
+    }
+
+    public async Task<byte[]> RenderLabelAsync(
+        Guid id, EtikettOrientierung orientierung, EtikettInhalt inhalt, bool proPortion, decimal? portionsgroesseG, string? mindestensHaltbarBis, CancellationToken ct = default)
     {
         var recipe = await FullQuery(db).FirstOrDefaultAsync(r => r.Id == id, ct) ?? throw new NotFoundException(nameof(Recipe), id);
         var dto = ToDto(recipe);
 
-        var (nutrition, nutritionLabel) = dto.Nutrition switch
+        var portionsgewicht = portionsgroesseG ?? recipe.PortionWeightG;
+        var (nutrition, basisLabel) = dto.Nutrition switch
         {
-            { } n when recipe.PortionWeightG is { } weight => (ScaleNutritionToPortion(n, weight), "Nährwerte pro Portion"),
-            { } n => (n, "Nährwerte je 100 g (Portionsgewicht nicht hinterlegt)"),
-            null => (null, "Nährwerte pro Portion"),
+            { } n when proPortion && portionsgewicht is { } gewicht => (ScaleNutritionToPortion(n, gewicht), $"pro Portion ({gewicht:0.#} g)"),
+            { } n => (n, "pro 100 g"),
+            null => (null, proPortion ? "pro Portion" : "pro 100 g"),
         };
+
+        // Die vom Rezeptrechner importierte Zutatenliste (Description, s. ImportFromRezeptrechnerAsync)
+        // enthält bereits die für ein Etikett übliche, verschachtelte Deklaration inkl. Unterrezepten
+        // (z. B. "Bratkartoffeln Grundrezept - (Kartoffel, Rapsöl, ...)") — das lässt sich aus den
+        // einzelnen RecipeIngredient-Zeilen (nur Menge + Name, ohne diese Verschachtelung) nicht
+        // rekonstruieren. Für manuell angelegte Rezepte ohne Import (Description == Name, Fallback aus
+        // dem Import) wird stattdessen die einfache Zutatenliste aus den Rezeptzutaten gebildet.
+        var ingredientsText = !string.IsNullOrWhiteSpace(recipe.Description) && !string.Equals(recipe.Description, recipe.Name, StringComparison.OrdinalIgnoreCase)
+            ? recipe.Description
+            : (recipe.Ingredients.Count > 0 ? string.Join(", ", recipe.Ingredients.Select(ri => ri.Ingredient.Name)) : "—");
 
         var model = new RecipeLabelModel(
             RecipeName: recipe.Name,
-            PortionWeightG: recipe.PortionWeightG,
-            Ingredients: recipe.Ingredients.Select(ri => $"{ri.Quantity:0.#} {ri.Unit} {ri.Ingredient.Name}").ToList(),
-            Allergens: dto.ResolvedAllergens,
-            Additives: dto.ResolvedAdditives,
+            Orientierung: orientierung,
+            Inhalt: inhalt,
+            NaehrwerteBasisLabel: basisLabel,
             Nutrition: nutrition,
-            NutritionLabel: nutritionLabel);
+            IngredientsText: ingredientsText,
+            MindestensHaltbarBisText: string.IsNullOrWhiteSpace(mindestensHaltbarBis) ? null : mindestensHaltbarBis);
 
         return pdfService.Render(new RecipeLabelDocument(model));
     }
@@ -541,6 +727,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             CoreTemperatureC = r.CoreTemperatureC,
             StorageNote = r.StorageNote,
             ShelfLifeAfterPrep = r.ShelfLifeAfterPrep,
+            ReductionFactor = r.ReductionFactor,
             Active = r.Active,
             Version = r.Version,
             CreatedAt = r.CreatedAt,
@@ -556,7 +743,9 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             ResolvedAdditives = resolvedAdditives,
             AdditivesAreOverridden = additivesOverridden,
             NutriScore = r.NutriScore?.ToString(),
+            NutriScoreCategory = r.NutriScoreCategory,
             NutritionIsAuthoritative = r.Nutrition != null,
+            NutritionClaims = r.NutritionClaims.Select(c => c.Text).ToArray(),
             TargetGroupIds = r.TargetGroups.Select(tg => tg.TargetAudienceGroupId).ToArray(),
             TargetGroupNames = r.TargetGroups.Select(tg => tg.TargetAudienceGroupEntity?.Name ?? string.Empty).Where(n => n != string.Empty).ToArray(),
         };

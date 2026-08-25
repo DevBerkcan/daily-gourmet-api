@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Text;
+using CsvHelper;
+using CsvHelper.Configuration;
 
 namespace DailyGourmet.Api.Services;
 
@@ -17,6 +19,12 @@ public record RezeptrechnerArtikelZeile(
     decimal SugarPer100, decimal FiberPer100, decimal ProteinPer100, decimal SaltPer100, decimal AlcoholPer100,
     string? IngredientListText, string? AllergensText, string? AdditivesText,
     decimal? PortionWeightG, int? StandardPortions, string? NutriScoreCategory, string? NutriScore, string? NutritionClaimsText);
+
+/// <summary>One recipe's row from the "Allergene-Liste" export — a structured X-marked matrix of
+/// the 14 EU-declarable allergen groups (with sub-types, e.g. "Gluten/ Weizen") that's far more
+/// precise than the free-text "Allergene" column in the Artikeldaten export, so RecipeHandler
+/// prefers this list for any recipe it covers.</summary>
+public record RezeptrechnerAllergenZeile(string RecipeName, List<string> MarkedAllergens);
 
 /// <summary>Parses the two Rezeptrechner export CSVs used by RecipeHandler.ImportFromRezeptrechnerAsync.
 /// Both files use a non-standard shape: every row is one giant field wrapped in a single pair of
@@ -78,6 +86,35 @@ public static class RezeptrechnerCsvParser
                 NutriScoreCategory: NullIfEmpty(fields[24]),
                 NutriScore: NullIfEmpty(fields[25]),
                 NutritionClaimsText: fields.Length > 26 ? NullIfEmpty(fields[26]) : null));
+        }
+        return result;
+    }
+
+    /// <summary>The "Allergene-Liste" export is a normal (comma-delimited, RFC4180-quoted) CSV —
+    /// unlike the other two exports — but its first line is a merged-cell "Allergene" group heading
+    /// with no real column names, so it's skipped before handing the rest to CsvHelper.</summary>
+    public static List<RezeptrechnerAllergenZeile> ParseAllergeneListe(Stream content)
+    {
+        using var reader = new StreamReader(content, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        reader.ReadLine(); // group heading row ("Allergene" spanning many empty cells) — not real headers
+        using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture) { HasHeaderRecord = true, MissingFieldFound = null, BadDataFound = null });
+        csv.Read();
+        csv.ReadHeader();
+        var headers = csv.HeaderRecord ?? [];
+
+        var result = new List<RezeptrechnerAllergenZeile>();
+        while (csv.Read())
+        {
+            var recipeName = csv.GetField(0)?.Trim();
+            if (string.IsNullOrWhiteSpace(recipeName)) continue;
+
+            var marked = new List<string>();
+            for (var i = 1; i < headers.Length; i++)
+            {
+                if (string.Equals(csv.GetField(i)?.Trim(), "X", StringComparison.OrdinalIgnoreCase))
+                    marked.Add(headers[i].Trim());
+            }
+            result.Add(new RezeptrechnerAllergenZeile(recipeName, marked));
         }
         return result;
     }

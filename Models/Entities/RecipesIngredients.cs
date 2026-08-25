@@ -102,11 +102,15 @@ public class IngredientSupplierPrice : BaseEntity
 public class IngredientNutrition
 {
     public decimal Kcal { get; set; }
+    public decimal Kj { get; set; }
     public decimal ProteinG { get; set; }
     public decimal FatG { get; set; }
+    public decimal SaturatedFatG { get; set; }
     public decimal CarbsG { get; set; }
     public decimal SugarG { get; set; }
+    public decimal FiberG { get; set; }
     public decimal SaltG { get; set; }
+    public decimal AlcoholG { get; set; }
     public NutritionSource Source { get; set; } = NutritionSource.Manuell;
 }
 
@@ -159,6 +163,11 @@ public class Recipe : BaseEntity, ITenantScoped
     public string? ShelfLifeAfterPrep { get; set; }
     public bool Active { get; set; } = true;
     public int Version { get; set; } = 1;
+
+    /// <summary>Gewichtsverlust/-gewinn-Faktor beim Garen (z. B. 0,7 = 30 % Gewichtsverlust). Vom
+    /// Kunden manuell gepflegt — kommt in keinem Rezeptrechner-Export vor. Standard 1 (kein
+    /// bekannter Unterschied). Treibt "Gewicht zubereitet" in der Nährwerte-Detailansicht.</summary>
+    public decimal ReductionFactor { get; set; } = 1m;
 
     /// <summary>Authoritative import values (nullable) — override live-computed values when present.</summary>
     public RecipeNutrition? Nutrition { get; set; }

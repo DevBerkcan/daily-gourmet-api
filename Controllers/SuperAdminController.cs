@@ -12,7 +12,7 @@ namespace DailyGourmet.Api.Controllers;
 [ApiController]
 [Route("api/super-admin")]
 [Authorize(Roles = "SUPER_ADMIN")]
-public class SuperAdminController(SuperAdminHandler handler, AuditLogHandler auditLogHandler) : ControllerBase
+public class SuperAdminController(SuperAdminHandler handler, AuditLogHandler auditLogHandler, TenantHandler tenantHandler) : ControllerBase
 {
     [HttpGet("audit-logs")]
     public async Task<ActionResult<ApiResponse<PagedResult<GlobalAuditLogDto>>>> AuditLogs(
@@ -59,6 +59,24 @@ public class SuperAdminController(SuperAdminHandler handler, AuditLogHandler aud
     [HttpGet("tenants/{id:guid}/users")]
     public async Task<ActionResult<ApiResponse<List<UserDto>>>> TenantUsers(Guid id, CancellationToken ct) =>
         Ok(ApiResponse<List<UserDto>>.Ok(await handler.TenantUsersAsync(id, ct)));
+
+    /// <summary>Unternehmensprofil (Stammdaten, Branding) und Einstellungen eines Mandanten werden
+    /// ausschließlich hier von Daily Gourmet gepflegt — nicht vom Mandanten selbst.</summary>
+    [HttpGet("tenants/{id:guid}/profile")]
+    public async Task<ActionResult<ApiResponse<TenantProfileDto>>> GetTenantProfile(Guid id, CancellationToken ct) =>
+        Ok(ApiResponse<TenantProfileDto>.Ok(await tenantHandler.GetProfileAsync(id, ct)));
+
+    [HttpPut("tenants/{id:guid}/profile")]
+    public async Task<ActionResult<ApiResponse<TenantProfileDto>>> UpdateTenantProfile(Guid id, [FromBody] TenantProfileDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<TenantProfileDto>.Ok(await tenantHandler.UpdateProfileAsync(id, dto, ct)));
+
+    [HttpGet("tenants/{id:guid}/settings")]
+    public async Task<ActionResult<ApiResponse<TenantSettingsDto>>> GetTenantSettings(Guid id, CancellationToken ct) =>
+        Ok(ApiResponse<TenantSettingsDto>.Ok(await tenantHandler.GetSettingsAsync(id, ct)));
+
+    [HttpPut("tenants/{id:guid}/settings")]
+    public async Task<ActionResult<ApiResponse<TenantSettingsDto>>> UpdateTenantSettings(Guid id, [FromBody] TenantSettingsDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<TenantSettingsDto>.Ok(await tenantHandler.UpdateSettingsAsync(id, dto, ct)));
 
     [HttpGet("users")]
     public async Task<ActionResult<ApiResponse<PagedResult<UserDto>>>> GlobalUsers(

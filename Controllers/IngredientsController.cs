@@ -1,6 +1,7 @@
 using DailyGourmet.Api.Handlers;
 using DailyGourmet.Api.Models.DTOs;
 using DailyGourmet.Api.Models.DTOs.Ingredients;
+using DailyGourmet.Api.Models.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -57,6 +58,19 @@ public class IngredientsController(IngredientHandler handler) : ControllerBase
     {
         var result = await handler.SyncAsync(rows, ct);
         return Ok(ApiResponse<SyncResultDto>.Ok(result));
+    }
+
+    /// <summary>Bulk-applies nutrition matched client-side against an external dataset (currently the
+    /// Bundeslebensmittelschlüssel, matched by name since it has no shared id with our ingredients) —
+    /// see IngredientHandler.ApplyExternalNutritionAsync. `source` names which NutritionSource enum
+    /// member to record (defaults to Bls, the only external source actually wired up so far).</summary>
+    [HttpPost("apply-nutrition")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse<ApplyNutritionResultDto>>> ApplyNutrition(
+        [FromBody] List<ApplyIngredientNutritionRowDto> rows, [FromQuery] NutritionSource source = NutritionSource.Bls, CancellationToken ct = default)
+    {
+        var result = await handler.ApplyExternalNutritionAsync(rows, source, ct);
+        return Ok(ApiResponse<ApplyNutritionResultDto>.Ok(result));
     }
 
     [HttpGet("{id:guid}/prices")]

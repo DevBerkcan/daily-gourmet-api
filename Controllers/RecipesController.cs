@@ -1,6 +1,7 @@
 using DailyGourmet.Api.Handlers;
 using DailyGourmet.Api.Models.DTOs;
 using DailyGourmet.Api.Models.DTOs.Recipes;
+using DailyGourmet.Api.Services.Pdf;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -66,23 +67,40 @@ public class RecipesController(RecipeHandler handler) : ControllerBase
         return Ok(ApiResponse<RecipeScaleResultDto>.Ok(result));
     }
 
-    [HttpGet("{id:guid}/label")]
-    public async Task<IActionResult> Label(Guid id, CancellationToken ct)
+    [HttpGet("{id:guid}/nutrition-detail")]
+    public async Task<ActionResult<ApiResponse<RecipeNutritionDetailDto>>> NutritionDetail(Guid id, CancellationToken ct)
     {
-        var bytes = await handler.RenderLabelAsync(id, ct);
+        var result = await handler.GetNutritionDetailAsync(id, ct);
+        return Ok(ApiResponse<RecipeNutritionDetailDto>.Ok(result));
+    }
+
+    [HttpGet("{id:guid}/label")]
+    public async Task<IActionResult> Label(
+        Guid id,
+        [FromQuery] string orientierung = "Quer",
+        [FromQuery] string inhalt = "Vollstaendig",
+        [FromQuery] bool proPortion = false,
+        [FromQuery] decimal? portionsgroesseG = null,
+        [FromQuery] string? mindestensHaltbarBis = null,
+        CancellationToken ct = default)
+    {
+        var o = Enum.TryParse<EtikettOrientierung>(orientierung, true, out var parsedOrientierung) ? parsedOrientierung : EtikettOrientierung.Quer;
+        var i = Enum.TryParse<EtikettInhalt>(inhalt, true, out var parsedInhalt) ? parsedInhalt : EtikettInhalt.Vollstaendig;
+        var bytes = await handler.RenderLabelAsync(id, o, i, proPortion, portionsgroesseG, mindestensHaltbarBis, ct);
         return File(bytes, "application/pdf", $"etikett-{id}.pdf");
     }
 
     [HttpPost("import")]
     [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     [RequestSizeLimit(20_000_000)]
-    public async Task<ActionResult<ApiResponse<RecipeImportResultDto>>> Import(IFormFile zutatenMengenFile, IFormFile artikeldatenFile, CancellationToken ct)
+    public async Task<ActionResult<ApiResponse<RecipeImportResultDto>>> Import(IFormFile zutatenMengenFile, IFormFile artikeldatenFile, IFormFile? allergeneListeFile, CancellationToken ct)
     {
         if (zutatenMengenFile.Length == 0 || artikeldatenFile.Length == 0)
             throw new DailyGourmet.Api.Helpers.ValidationException("Beide Dateien (Zutaten-Mengen und Artikeldaten) werden benötigt.");
         await using var zutatenStream = zutatenMengenFile.OpenReadStream();
         await using var artikelStream = artikeldatenFile.OpenReadStream();
-        var result = await handler.ImportFromRezeptrechnerAsync(zutatenStream, artikelStream, ct);
+        await using var allergeneStream = allergeneListeFile is { Length: > 0 } ? allergeneListeFile.OpenReadStream() : null;
+        var result = await handler.ImportFromRezeptrechnerAsync(zutatenStream, artikelStream, allergeneStream, ct);
         return Ok(ApiResponse<RecipeImportResultDto>.Ok(result));
     }
 }

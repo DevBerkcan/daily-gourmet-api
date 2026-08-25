@@ -6,11 +6,15 @@ namespace DailyGourmet.Api.Models.DTOs.Ingredients;
 public class NutritionDto
 {
     public decimal Kcal { get; set; }
+    public decimal Kj { get; set; }
     public decimal ProteinG { get; set; }
     public decimal FatG { get; set; }
+    public decimal SaturatedFatG { get; set; }
     public decimal CarbsG { get; set; }
     public decimal SugarG { get; set; }
+    public decimal FiberG { get; set; }
     public decimal SaltG { get; set; }
+    public decimal AlcoholG { get; set; }
     public string Source { get; set; } = "Manuell";
 }
 
@@ -90,6 +94,22 @@ public class SyncResultDto
     public int Added { get; set; }
     public int Updated { get; set; }
     public int SkippedManuallyEdited { get; set; }
+}
+
+/// <summary>One matched row for IngredientHandler.ApplyExternalNutritionAsync — an external source
+/// (e.g. the Bundeslebensmittelschlüssel) supplying real nutrition for an already-existing ingredient
+/// identified by its own IngredientId, matched client-side by name against the external dataset.</summary>
+public class ApplyIngredientNutritionRowDto
+{
+    [Required] public Guid IngredientId { get; set; }
+    [Required] public NutritionDto Nutrition { get; set; } = new();
+}
+
+public class ApplyNutritionResultDto
+{
+    public int Applied { get; set; }
+    public int SkippedManuallyEdited { get; set; }
+    public int SkippedNotFound { get; set; }
 }
 
 public class UnmatchedRowDto
