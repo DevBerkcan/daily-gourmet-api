@@ -5,11 +5,12 @@ using DailyGourmet.Api.Models.DTOs;
 using DailyGourmet.Api.Models.DTOs.Orders;
 using DailyGourmet.Api.Models.Entities;
 using DailyGourmet.Api.Models.Enums;
+using DailyGourmet.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext)
+public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IEmailService email)
 {
     private static readonly OrderStatus[] BindingStatuses = [OrderStatus.SUBMITTED, OrderStatus.CONFIRMED, OrderStatus.LOCKED];
 
@@ -50,6 +51,7 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
         EnsureFacilityAccess(facilityId);
 
         var order = await db.Orders.Include(o => o.Items).FirstOrDefaultAsync(o => o.FacilityId == facilityId && o.MealPlanId == dto.MealPlanId, ct);
+        var wasAlreadySubmitted = order?.Status is OrderStatus.SUBMITTED or OrderStatus.CONFIRMED or OrderStatus.LOCKED;
         var deadline = await ComputeDeadlineAsync(facilityId, dto.Items, ct);
 
         //if (dto.Submit && DateTime.UtcNow > deadline)
@@ -83,6 +85,8 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
         if (dto.Submit) order.SubmittedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
+        if (dto.Submit && wasAlreadySubmitted != true)
+            await NotifyTenantAdminsOfNewOrderAsync(order.TenantId, facilityId, dto.Items.Sum(i => i.Portions), order.DeadlineAtUtc, ct);
         return await GetByIdAsync(order.Id, ct);
     }
 
@@ -96,17 +100,52 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
         order.Status = OrderStatus.SUBMITTED;
         order.SubmittedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+        var portionen = await db.OrderItems.Where(i => i.OrderId == order.Id).SumAsync(i => i.Portions, ct);
+        await NotifyTenantAdminsOfNewOrderAsync(order.TenantId, order.FacilityId, portionen, order.DeadlineAtUtc, ct);
         return await GetByIdAsync(id, ct);
     }
 
     public async Task<OrderDto> ConfirmAsync(Guid id, CancellationToken ct = default)
     {
-        var order = await db.Orders.FirstOrDefaultAsync(o => o.Id == id, ct) ?? throw new NotFoundException(nameof(Order), id);
+        var order = await db.Orders.Include(o => o.Facility).Include(o => o.MealPlan).FirstOrDefaultAsync(o => o.Id == id, ct) ?? throw new NotFoundException(nameof(Order), id);
         if (order.Status != OrderStatus.SUBMITTED) throw new ConflictException("Nur abgesendete Bestellungen können bestätigt werden.");
         order.Status = OrderStatus.CONFIRMED;
         order.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+
+        if (!string.IsNullOrWhiteSpace(order.Facility.Email))
+        {
+            var html = $"""
+                <p>Ihre Bestellung für KW {order.MealPlan.CalendarWeek}/{order.MealPlan.Year} wurde von Daily Gourmet bestätigt.</p>
+                <p>Änderungen sind ab jetzt nur noch bis zur tagesaktuellen Frist möglich.</p>
+                """;
+            var text = $"Ihre Bestellung für KW {order.MealPlan.CalendarWeek}/{order.MealPlan.Year} wurde von Daily Gourmet bestätigt. Änderungen sind ab jetzt nur noch bis zur tagesaktuellen Frist möglich.";
+            await email.SendAsync(order.Facility.Email, order.Facility.ContactPerson, "Ihre Bestellung wurde bestätigt", html, text);
+        }
+
         return await GetByIdAsync(id, ct);
+    }
+
+    /// <summary>Alle Tenant Owner/Admins des Mandanten werden benachrichtigt, sobald eine Einrichtung
+    /// eine Bestellung verbindlich absendet — nur beim tatsächlichen Übergang zu SUBMITTED, nicht bei
+    /// jedem erneuten Speichern einer bereits abgesendeten Bestellung (siehe wasAlreadySubmitted in
+    /// SaveAsync).</summary>
+    private async Task NotifyTenantAdminsOfNewOrderAsync(Guid tenantId, Guid facilityId, int portionen, DateTime deadlineAtUtc, CancellationToken ct)
+    {
+        var empfaenger = await db.Users
+            .Where(u => u.TenantId == tenantId && (u.Role == Role.TENANT_OWNER || u.Role == Role.TENANT_ADMIN) && u.Status == UserStatus.AKTIV)
+            .ToListAsync(ct);
+        if (empfaenger.Count == 0) return;
+
+        var facility = await db.Facilities.FirstOrDefaultAsync(f => f.Id == facilityId, ct);
+        var facilityName = facility?.Name ?? "Eine Einrichtung";
+        var html = $"""
+            <p><strong>{facilityName}</strong> hat eine Bestellung abgesendet.</p>
+            <p>{portionen} Portionen insgesamt · Frist: {deadlineAtUtc:dd.MM.yyyy HH:mm} Uhr</p>
+            """;
+        var text = $"{facilityName} hat eine Bestellung abgesendet. {portionen} Portionen insgesamt, Frist: {deadlineAtUtc:dd.MM.yyyy HH:mm} Uhr.";
+        foreach (var user in empfaenger)
+            await email.SendAsync(user.Email, user.Name, $"Neue Bestellung von {facilityName}", html, text);
     }
 
     public async Task<OrderDto> LockAsync(Guid id, CancellationToken ct = default)

@@ -62,7 +62,7 @@ public class FacilityHandler(
             CustomerNumber = customerNumber,
             Address = dto.Address.Trim(),
             ContactPerson = dto.ContactPerson.Trim(),
-            Email = dto.Email.Trim(),
+            Email = dto.Email?.Trim() ?? "",
             Phone = dto.Phone.Trim(),
             ActiveWeekdays = dto.ActiveWeekdays,
             PortionPrice = dto.PortionPrice,
@@ -89,7 +89,7 @@ public class FacilityHandler(
         facility.Name = dto.Name.Trim();
         facility.Address = dto.Address.Trim();
         facility.ContactPerson = dto.ContactPerson.Trim();
-        facility.Email = dto.Email.Trim();
+        facility.Email = dto.Email?.Trim() ?? "";
         facility.Phone = dto.Phone.Trim();
         facility.ActiveWeekdays = dto.ActiveWeekdays;
         facility.PortionPrice = dto.PortionPrice;
@@ -113,7 +113,7 @@ public class FacilityHandler(
 
         facility.Address = dto.Address.Trim();
         facility.ContactPerson = dto.ContactPerson.Trim();
-        facility.Email = dto.Email.Trim();
+        facility.Email = dto.Email?.Trim() ?? "";
         facility.Phone = dto.Phone.Trim();
 
         facilities.Update(facility);

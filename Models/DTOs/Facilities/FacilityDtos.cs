@@ -31,8 +31,11 @@ public class CreateFacilityDto
     [MaxLength(200)]
     public string ContactPerson { get; set; } = string.Empty;
 
+    // Nullable, nicht nur optional durch fehlendes [Required]: [EmailAddress] hält einen leeren
+    // String (anders als null) für ein ungültiges Format und lehnt ihn ab — ohne diese Nullability
+    // schlägt das Speichern ohne erkennbaren Grund fehl, sobald das E-Mail-Feld leer bleibt.
     [EmailAddress, MaxLength(256)]
-    public string Email { get; set; } = string.Empty;
+    public string? Email { get; set; }
 
     [MaxLength(50)]
     public string Phone { get; set; } = string.Empty;
@@ -86,7 +89,7 @@ public class UpdatePortalFacilityDto
     public string ContactPerson { get; set; } = string.Empty;
 
     [EmailAddress, MaxLength(256)]
-    public string Email { get; set; } = string.Empty;
+    public string? Email { get; set; }
 
     [MaxLength(50)]
     public string Phone { get; set; } = string.Empty;

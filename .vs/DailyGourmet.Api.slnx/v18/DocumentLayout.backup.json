@@ -7,16 +7,8 @@
       "RelativeMoniker": "D:0:0:{E11669ED-071B-A780-C50E-39476D1F73F7}|DailyGourmet.Api.csproj|solutionrelative:appsettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{E11669ED-071B-A780-C50E-39476D1F73F7}|DailyGourmet.Api.csproj|c:\\users\\turkesmedin\\repos\\gentlegroup\\daily.gourmet\\daily-gourmet-api\\web.config||{FA3CD31E-987B-443A-9B81-186104E8DAC1}",
-      "RelativeMoniker": "D:0:0:{E11669ED-071B-A780-C50E-39476D1F73F7}|DailyGourmet.Api.csproj|solutionrelative:web.config||{FA3CD31E-987B-443A-9B81-186104E8DAC1}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{E11669ED-071B-A780-C50E-39476D1F73F7}|DailyGourmet.Api.csproj|c:\\users\\turkesmedin\\repos\\gentlegroup\\daily.gourmet\\daily-gourmet-api\\properties\\launchsettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}",
-      "RelativeMoniker": "D:0:0:{E11669ED-071B-A780-C50E-39476D1F73F7}|DailyGourmet.Api.csproj|solutionrelative:properties\\launchsettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{E11669ED-071B-A780-C50E-39476D1F73F7}|DailyGourmet.Api.csproj|c:\\users\\turkesmedin\\repos\\gentlegroup\\daily.gourmet\\daily-gourmet-api\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{E11669ED-071B-A780-C50E-39476D1F73F7}|DailyGourmet.Api.csproj|solutionrelative:program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+      "AbsoluteMoniker": "D:0:0:{E11669ED-071B-A780-C50E-39476D1F73F7}|DailyGourmet.Api.csproj|c:\\users\\turkesmedin\\repos\\gentlegroup\\daily.gourmet\\daily-gourmet-api\\handlers\\orderhandler.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{E11669ED-071B-A780-C50E-39476D1F73F7}|DailyGourmet.Api.csproj|solutionrelative:handlers\\orderhandler.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     }
   ],
   "DocumentGroupContainers": [
@@ -26,50 +18,23 @@
       "DocumentGroups": [
         {
           "DockedWidth": 1151,
-          "SelectedChildIndex": 4,
+          "SelectedChildIndex": 2,
           "Children": [
-            {
-              "$type": "Document",
-              "DocumentIndex": 1,
-              "Title": "web.config",
-              "DocumentMoniker": "C:\\Users\\TurkesMedin\\repos\\GentleGroup\\Daily.Gourmet\\daily-gourmet-api\\web.config",
-              "RelativeDocumentMoniker": "web.config",
-              "ToolTip": "C:\\Users\\TurkesMedin\\repos\\GentleGroup\\Daily.Gourmet\\daily-gourmet-api\\web.config",
-              "RelativeToolTip": "web.config",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAUAAAAtAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000601|",
-              "WhenOpened": "2026-08-22T21:22:29.982Z",
-              "EditorCaption": ""
-            },
             {
               "$type": "Bookmark",
               "Name": "ST:0:0:{34e76e81-ee4a-11d0-ae2e-00a0c90fffc3}"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 3,
-              "Title": "Program.cs",
-              "DocumentMoniker": "C:\\Users\\TurkesMedin\\repos\\GentleGroup\\Daily.Gourmet\\daily-gourmet-api\\Program.cs",
-              "RelativeDocumentMoniker": "Program.cs",
-              "ToolTip": "C:\\Users\\TurkesMedin\\repos\\GentleGroup\\Daily.Gourmet\\daily-gourmet-api\\Program.cs",
-              "RelativeToolTip": "Program.cs",
-              "ViewState": "AgIAAC8AAAAAAAAAAAAAAD8AAAAbAAAAAAAAAA==",
+              "DocumentIndex": 1,
+              "Title": "OrderHandler.cs",
+              "DocumentMoniker": "C:\\Users\\TurkesMedin\\repos\\GentleGroup\\Daily.Gourmet\\daily-gourmet-api\\Handlers\\OrderHandler.cs",
+              "RelativeDocumentMoniker": "Handlers\\OrderHandler.cs",
+              "ToolTip": "C:\\Users\\TurkesMedin\\repos\\GentleGroup\\Daily.Gourmet\\daily-gourmet-api\\Handlers\\OrderHandler.cs",
+              "RelativeToolTip": "Handlers\\OrderHandler.cs",
+              "ViewState": "AgIAACUAAAAAAAAAAAAgwDUAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-22T19:59:47.262Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 2,
-              "Title": "launchSettings.json",
-              "DocumentMoniker": "C:\\Users\\TurkesMedin\\repos\\GentleGroup\\Daily.Gourmet\\daily-gourmet-api\\Properties\\launchSettings.json",
-              "RelativeDocumentMoniker": "Properties\\launchSettings.json",
-              "ToolTip": "C:\\Users\\TurkesMedin\\repos\\GentleGroup\\Daily.Gourmet\\daily-gourmet-api\\Properties\\launchSettings.json",
-              "RelativeToolTip": "Properties\\launchSettings.json",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAsAAAAGAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001642|",
-              "WhenOpened": "2026-08-22T19:56:51.767Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-08-25T10:25:39.273Z"
             },
             {
               "$type": "Document",
@@ -79,9 +44,9 @@
               "RelativeDocumentMoniker": "appsettings.json",
               "ToolTip": "C:\\Users\\TurkesMedin\\repos\\GentleGroup\\Daily.Gourmet\\daily-gourmet-api\\appsettings.json",
               "RelativeToolTip": "appsettings.json",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAwwBMAAABxAAAAAAAAAA==",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001642|",
-              "WhenOpened": "2026-08-17T22:26:02.27Z",
+              "WhenOpened": "2026-08-24T19:53:50.743Z",
               "EditorCaption": ""
             }
           ]
