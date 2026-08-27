@@ -2,15 +2,21 @@ using DailyGourmet.Api.Authentication;
 using DailyGourmet.Api.Data;
 using DailyGourmet.Api.Models.DTOs;
 using DailyGourmet.Api.Models.DTOs.Tenants;
+using DailyGourmet.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class AuditLogHandler(DailyGourmetDbContext db, ITenantContext tenantContext)
+public class AuditLogHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IFeatureFlagService featureFlags)
 {
     public async Task<PagedResult<AuditLogDto>> ListAsync(Guid? userId, string? action, string? entity, DateTime? from, DateTime? to, int page, int pageSize, CancellationToken ct = default)
     {
         var query = db.AuditLogs.Include(a => a.User).Where(a => a.TenantId == tenantContext.TenantId);
+        // Impersonation rows (see ImpersonationAuditMiddleware) are written against the tenant so the
+        // super admin's actions are traceable, but by default a tenant doesn't see "the platform was
+        // in my account" in their own log unless explicitly opted in via this flag.
+        if (!await featureFlags.IsEnabledAsync(tenantContext.TenantId!.Value, "impersonation-audit-visible-to-tenant", ct))
+            query = query.Where(a => a.Entity != "Impersonation");
         if (userId is { } uid) query = query.Where(a => a.UserId == uid);
         if (!string.IsNullOrWhiteSpace(action)) query = query.Where(a => a.Action.Contains(action));
         if (!string.IsNullOrWhiteSpace(entity)) query = query.Where(a => a.Entity == entity);

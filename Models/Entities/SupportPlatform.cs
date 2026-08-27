@@ -22,8 +22,11 @@ public class SupportTicket : BaseEntity, ITenantScoped
     public ICollection<SupportTicketAttachment> Attachments { get; set; } = new List<SupportTicketAttachment>();
 }
 
-/// <summary>A file (e.g. a screenshot) attached to a ticket — see Services/IFileStorageService for
-/// how StorageKey resolves to actual bytes.</summary>
+/// <summary>An image (screenshot) attached to a ticket. Uploads go through IImageHostingService
+/// (imgbb) and are stored as a public ExternalUrl; StorageKey/local disk (IFileStorageService)
+/// remains only for any attachment uploaded before that switch, so it stays nullable rather than
+/// being repurposed to also hold a URL — keeps "hosted externally" an unambiguous ExternalUrl != null
+/// check everywhere this is read.</summary>
 public class SupportTicketAttachment : BaseEntity
 {
     public Guid TicketId { get; set; }
@@ -34,7 +37,10 @@ public class SupportTicketAttachment : BaseEntity
     public string FileName { get; set; } = null!;
     public string ContentType { get; set; } = null!;
     public long SizeBytes { get; set; }
-    public string StorageKey { get; set; } = null!;
+    public string? StorageKey { get; set; }
+    public string? ExternalUrl { get; set; }
+    /// <summary>imgbb's delete_url — kept for future moderation/cleanup tooling, not used yet.</summary>
+    public string? DeleteUrl { get; set; }
 }
 
 public class SupportTicketReply : BaseEntity

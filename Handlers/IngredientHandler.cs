@@ -5,11 +5,12 @@ using DailyGourmet.Api.Models.DTOs;
 using DailyGourmet.Api.Models.DTOs.Ingredients;
 using DailyGourmet.Api.Models.Entities;
 using DailyGourmet.Api.Models.Enums;
+using DailyGourmet.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantContext)
+public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IFeatureFlagService featureFlags)
 {
     public async Task<PagedResult<IngredientDto>> ListAsync(string? search, Guid? category, Guid? allergen, bool? active, int page, int pageSize, CancellationToken ct = default)
     {
@@ -206,6 +207,9 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
     /// manually-edited ingredient, same protection as SyncAsync.</summary>
     public async Task<ApplyNutritionResultDto> ApplyExternalNutritionAsync(List<ApplyIngredientNutritionRowDto> rows, NutritionSource source, CancellationToken ct = default)
     {
+        if (!await featureFlags.IsEnabledAsync(tenantContext.TenantId!.Value, "naehrwert-api", ct))
+            throw new ForbiddenException("Die Nährwert-API ist für Ihren Mandanten nicht aktiviert.");
+
         var ids = rows.Select(r => r.IngredientId).ToList();
         var ingredients = await db.Ingredients.Where(i => ids.Contains(i.Id)).ToDictionaryAsync(i => i.Id, ct);
 

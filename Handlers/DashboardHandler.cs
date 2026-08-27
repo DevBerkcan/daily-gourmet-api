@@ -4,11 +4,12 @@ using DailyGourmet.Api.Data;
 using DailyGourmet.Api.Helpers;
 using DailyGourmet.Api.Models.DTOs.Dashboard;
 using DailyGourmet.Api.Models.Enums;
+using DailyGourmet.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class DashboardHandler(DailyGourmetDbContext db, ITenantContext tenantContext)
+public class DashboardHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IFeatureFlagService featureFlags)
 {
     private static readonly OrderStatus[] BindingStatuses = [OrderStatus.SUBMITTED, OrderStatus.CONFIRMED, OrderStatus.LOCKED];
 
@@ -43,6 +44,8 @@ public class DashboardHandler(DailyGourmetDbContext db, ITenantContext tenantCon
     public async Task<PortalDashboardSummaryDto> PortalSummaryAsync(CancellationToken ct = default)
     {
         var facilityId = tenantContext.FacilityId ?? throw new ForbiddenException("Kein Einrichtungskontext vorhanden.");
+        if (!await featureFlags.IsEnabledAsync(tenantContext.TenantId!.Value, "kundenportal", ct))
+            throw new ForbiddenException("Das Kundenportal ist für Ihren Mandanten nicht aktiviert.");
 
         var publishedPlan = await db.MealPlans
             .Where(m => m.Status == MealPlanStatus.PUBLISHED && m.Facilities.Any(f => f.FacilityId == facilityId))
@@ -69,6 +72,9 @@ public class DashboardHandler(DailyGourmetDbContext db, ITenantContext tenantCon
 
     public async Task<RevenueResponseDto> RevenueAsync(DateTime? from, DateTime? to, CancellationToken ct = default)
     {
+        if (!await featureFlags.IsEnabledAsync(tenantContext.TenantId!.Value, "revenue-export", ct))
+            throw new ForbiddenException("Die Umsatzauswertung ist für Ihren Mandanten nicht aktiviert.");
+
         var effectiveFrom = from ?? DateTime.UtcNow.AddDays(-84);
         var effectiveTo = to ?? DateTime.UtcNow;
 

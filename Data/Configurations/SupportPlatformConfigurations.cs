@@ -44,7 +44,9 @@ public class SupportTicketAttachmentConfiguration : IEntityTypeConfiguration<Sup
     {
         b.Property(a => a.FileName).HasMaxLength(260).IsRequired();
         b.Property(a => a.ContentType).HasMaxLength(100).IsRequired();
-        b.Property(a => a.StorageKey).HasMaxLength(500).IsRequired();
+        b.Property(a => a.StorageKey).HasMaxLength(500);
+        b.Property(a => a.ExternalUrl).HasMaxLength(1000);
+        b.Property(a => a.DeleteUrl).HasMaxLength(1000);
 
         b.HasOne(a => a.Ticket).WithMany(t => t.Attachments)
             .HasForeignKey(a => a.TicketId).OnDelete(DeleteBehavior.Cascade);

@@ -33,7 +33,7 @@ public class RoutesController(DeliveryRouteHandler handler) : ControllerBase
         Ok(ApiResponse<DeliveryRouteDto>.Ok(await handler.CreateAsync(dto, ct)));
 
     [HttpPut("{id:guid}/status")]
-    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,DRIVER")]
     public async Task<ActionResult<ApiResponse<DeliveryRouteDto>>> UpdateStatus(Guid id, [FromBody] UpdateStatusDto dto, CancellationToken ct) =>
         Ok(ApiResponse<DeliveryRouteDto>.Ok(await handler.UpdateStatusAsync(id, dto, ct)));
 

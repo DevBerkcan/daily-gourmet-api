@@ -18,6 +18,9 @@ public class SupportTicketAttachmentDto
     public string ContentType { get; set; } = string.Empty;
     public long SizeBytes { get; set; }
     public DateTime CreatedAt { get; set; }
+    /// <summary>Public imgbb URL — null only for a legacy attachment uploaded before the imgbb
+    /// switch (see SupportTicketHandler.GetAttachmentAsync for how those are still served).</summary>
+    public string? Url { get; set; }
 }
 
 public class SupportTicketDto
@@ -67,4 +70,13 @@ public class SupportSessionDto
     public DateTime ExpiresAtUtc { get; set; }
     public DateTime? EndedAtUtc { get; set; }
     public string? EndedReason { get; set; }
+}
+
+/// <summary>The token a super admin swaps to in order to actually browse a tenant's admin UI as
+/// that tenant while a SupportSession is active — see SupportSessionHandler.ImpersonateAsync.</summary>
+public class ImpersonationTokenDto
+{
+    public string Token { get; set; } = string.Empty;
+    public string TenantName { get; set; } = string.Empty;
+    public DateTime ExpiresAtUtc { get; set; }
 }

@@ -19,7 +19,7 @@ public class FacilitiesController(FacilityHandler handler, FacilityClosureHandle
         [FromQuery] string? search, [FromQuery] Guid? locationId,
         [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default)
     {
-        var result = await handler.ListAsync(search, locationId, page, pageSize, ct);
+        var result = await handler.ListAsync(search, locationId, null, page, pageSize, ct);
         return Ok(ApiResponse<PagedResult<FacilityDto>>.Ok(result));
     }
 
@@ -46,6 +46,19 @@ public class FacilitiesController(FacilityHandler handler, FacilityClosureHandle
     {
         var result = await handler.UpdateAsync(id, dto, ct);
         return Ok(ApiResponse<FacilityDto>.Ok(result));
+    }
+
+    [HttpGet("{id:guid}/delete-impact")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse<FacilityDeleteImpactDto>>> DeleteImpact(Guid id, CancellationToken ct) =>
+        Ok(ApiResponse<FacilityDeleteImpactDto>.Ok(await handler.GetDeleteImpactAsync(id, ct)));
+
+    [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse>> Delete(Guid id, CancellationToken ct)
+    {
+        await handler.DeleteAsync(id, ct);
+        return Ok(ApiResponse.Ok());
     }
 
     [HttpGet("{id:guid}/closures")]

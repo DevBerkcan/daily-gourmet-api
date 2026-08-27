@@ -27,6 +27,7 @@ builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection(SmtpOpt
 builder.Services.Configure<CorsOptions>(builder.Configuration.GetSection(CorsOptions.SectionName));
 builder.Services.Configure<AppOptions>(builder.Configuration.GetSection(AppOptions.SectionName));
 builder.Services.Configure<FileStorageOptions>(builder.Configuration.GetSection(FileStorageOptions.SectionName));
+builder.Services.Configure<ImgBbOptions>(builder.Configuration.GetSection(ImgBbOptions.SectionName));
 
 // ---- Data ----
 builder.Services.AddScoped<ITenantContext, TenantContext>();
@@ -83,6 +84,8 @@ builder.Services.AddCors(options =>
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IPdfService, PdfService>();
 builder.Services.AddScoped<IFileStorageService, LocalFileStorageService>();
+builder.Services.AddScoped<IFeatureFlagService, FeatureFlagService>();
+builder.Services.AddHttpClient<IImageHostingService, ImgBbImageHostingService>();
 
 // ---- Repositories ----
 // Open-generic registration covers every entity that doesn't need custom queries; entities that
@@ -95,6 +98,7 @@ builder.Services.AddScoped<ITenantSettingsRepository, TenantSettingsRepository>(
 builder.Services.AddScoped<AuthHandler>();
 builder.Services.AddScoped<FacilityHandler>();
 builder.Services.AddScoped<FacilityClosureHandler>();
+builder.Services.AddScoped<FeatureFlagHandler>();
 builder.Services.AddRecipesIngredientsModule();
 builder.Services.AddMealPlansOrdersModule();
 builder.Services.AddProductionKitchenModule();
@@ -133,6 +137,14 @@ if (args.Contains("--seed"))
     return;
 }
 
+// Runs on every normal startup (unlike SeedAsync, which only ever touches a still-empty database) so
+// a newly-added flag in DbSeeder's catalog reaches an already-seeded/production database too.
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<DailyGourmetDbContext>();
+    await DbSeeder.EnsureFeatureFlagsExistAsync(db);
+}
+
 app.UseMiddleware<ExceptionMiddleware>();
 
 // CORS must run before UseHttpsRedirection: a redirect response to a CORS preflight (OPTIONS)
@@ -154,6 +166,7 @@ else
 app.UseAuthentication();
 app.UseMiddleware<TenantContextMiddleware>();
 app.UseAuthorization();
+app.UseMiddleware<ImpersonationAuditMiddleware>();
 app.MapControllers();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 

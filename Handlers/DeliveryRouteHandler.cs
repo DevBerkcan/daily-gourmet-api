@@ -87,6 +87,11 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
     public async Task<DeliveryRouteDto> UpdateStatusAsync(Guid id, UpdateStatusDto dto, CancellationToken ct = default)
     {
         var route = await db.Routes.FirstOrDefaultAsync(r => r.Id == id, ct) ?? throw new NotFoundException(nameof(DeliveryRoute), id);
+        if (tenantContext.Role == "DRIVER")
+        {
+            var driver = await GetCallerDriverAsync(ct);
+            if (route.DriverId != driver.Id) throw new ForbiddenException("Kein Zugriff auf diese Route.");
+        }
         if (!Enum.TryParse<RouteStatus>(dto.Status, out var target)) throw new ValidationException("Ungültiger Status.");
         var currentIndex = Array.IndexOf(RouteStatusOrder, route.Status.ToString());
         var targetIndex = Array.IndexOf(RouteStatusOrder, target.ToString());

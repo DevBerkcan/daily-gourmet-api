@@ -1,5 +1,6 @@
 using DailyGourmet.Api.Handlers;
 using DailyGourmet.Api.Models.DTOs;
+using DailyGourmet.Api.Models.DTOs.Facilities;
 using DailyGourmet.Api.Models.DTOs.SuperAdmin;
 using DailyGourmet.Api.Models.DTOs.Tenants;
 using DailyGourmet.Api.Models.DTOs.Users;
@@ -12,7 +13,7 @@ namespace DailyGourmet.Api.Controllers;
 [ApiController]
 [Route("api/super-admin")]
 [Authorize(Roles = "SUPER_ADMIN")]
-public class SuperAdminController(SuperAdminHandler handler, AuditLogHandler auditLogHandler, TenantHandler tenantHandler) : ControllerBase
+public class SuperAdminController(SuperAdminHandler handler, AuditLogHandler auditLogHandler, TenantHandler tenantHandler, FacilityHandler facilityHandler) : ControllerBase
 {
     [HttpGet("audit-logs")]
     public async Task<ActionResult<ApiResponse<PagedResult<GlobalAuditLogDto>>>> AuditLogs(
@@ -88,13 +89,42 @@ public class SuperAdminController(SuperAdminHandler handler, AuditLogHandler aud
     public async Task<ActionResult<ApiResponse<UserDto>>> CreateUser([FromBody] CreateUserDto dto, CancellationToken ct) =>
         Ok(ApiResponse<UserDto>.Ok(await handler.CreateUserAsync(dto, ct)));
 
+    [HttpPut("users/{id:guid}")]
+    public async Task<ActionResult<ApiResponse<UserDto>>> UpdateUser(Guid id, [FromBody] SuperAdminUpdateUserDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<UserDto>.Ok(await handler.UpdateUserAsync(id, dto, ct)));
+
+    [HttpPost("users/{id:guid}/deactivate")]
+    public async Task<ActionResult<ApiResponse>> DeactivateUser(Guid id, CancellationToken ct)
+    {
+        await handler.SetUserStatusAsync(id, UserStatus.DEAKTIVIERT, ct);
+        return Ok(ApiResponse.Ok());
+    }
+
+    [HttpPost("users/{id:guid}/activate")]
+    public async Task<ActionResult<ApiResponse>> ActivateUser(Guid id, CancellationToken ct)
+    {
+        await handler.SetUserStatusAsync(id, UserStatus.AKTIV, ct);
+        return Ok(ApiResponse.Ok());
+    }
+
+    [HttpPost("users/{id:guid}/password-reset")]
+    public async Task<ActionResult<ApiResponse>> ResetUserPassword(Guid id, CancellationToken ct)
+    {
+        await handler.TriggerPasswordResetAsync(id, ct);
+        return Ok(ApiResponse.Ok());
+    }
+
     [HttpGet("feature-flags")]
-    public async Task<ActionResult<ApiResponse<List<FeatureFlagDto>>>> ListFeatureFlags(CancellationToken ct) =>
-        Ok(ApiResponse<List<FeatureFlagDto>>.Ok(await handler.ListFeatureFlagsAsync(ct)));
+    public async Task<ActionResult<ApiResponse<List<FeatureFlagDto>>>> ListFeatureFlags([FromQuery] Guid? tenantId, CancellationToken ct) =>
+        Ok(ApiResponse<List<FeatureFlagDto>>.Ok(await handler.ListFeatureFlagsAsync(tenantId, ct)));
 
     [HttpPut("feature-flags/{id:guid}")]
     public async Task<ActionResult<ApiResponse<FeatureFlagDto>>> UpdateFeatureFlag(Guid id, [FromBody] UpdateFeatureFlagDto dto, CancellationToken ct) =>
         Ok(ApiResponse<FeatureFlagDto>.Ok(await handler.UpdateFeatureFlagAsync(id, dto, ct)));
+
+    [HttpGet("feature-flags/adoption")]
+    public async Task<ActionResult<ApiResponse<List<FeatureFlagAdoptionDto>>>> FeatureFlagAdoption(CancellationToken ct) =>
+        Ok(ApiResponse<List<FeatureFlagAdoptionDto>>.Ok(await handler.FeatureFlagAdoptionAsync(ct)));
 
     [HttpPut("tenants/{id:guid}/feature-flags")]
     public async Task<ActionResult<ApiResponse>> SetTenantFeatureFlag(Guid id, [FromBody] SetTenantFeatureFlagDto dto, CancellationToken ct)
@@ -104,6 +134,30 @@ public class SuperAdminController(SuperAdminHandler handler, AuditLogHandler aud
     }
 
     [HttpGet("locations")]
-    public async Task<ActionResult<ApiResponse<List<LocationSummaryDto>>>> AllLocations(CancellationToken ct) =>
-        Ok(ApiResponse<List<LocationSummaryDto>>.Ok(await handler.AllLocationsAsync(ct)));
+    public async Task<ActionResult<ApiResponse<List<LocationSummaryDto>>>> AllLocations([FromQuery] Guid? tenantId, CancellationToken ct) =>
+        Ok(ApiResponse<List<LocationSummaryDto>>.Ok(await handler.AllLocationsAsync(tenantId, ct)));
+
+    [HttpGet("tenants/{tenantId:guid}/facilities")]
+    public async Task<ActionResult<ApiResponse<PagedResult<FacilityDto>>>> TenantFacilities(
+        Guid tenantId, [FromQuery] int page = 1, [FromQuery] int pageSize = 100, CancellationToken ct = default) =>
+        Ok(ApiResponse<PagedResult<FacilityDto>>.Ok(await facilityHandler.ListAsync(null, null, tenantId, page, pageSize, ct)));
+
+    [HttpPost("tenants/{tenantId:guid}/facilities")]
+    public async Task<ActionResult<ApiResponse<FacilityDto>>> CreateTenantFacility(Guid tenantId, [FromBody] CreateFacilityDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<FacilityDto>.Ok(await facilityHandler.CreateAsync(tenantId, dto, ct)));
+
+    [HttpPut("tenants/{tenantId:guid}/facilities/{id:guid}")]
+    public async Task<ActionResult<ApiResponse<FacilityDto>>> UpdateTenantFacility(Guid tenantId, Guid id, [FromBody] UpdateFacilityDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<FacilityDto>.Ok(await facilityHandler.UpdateAsync(id, dto, ct)));
+
+    [HttpGet("tenants/{tenantId:guid}/facilities/{id:guid}/delete-impact")]
+    public async Task<ActionResult<ApiResponse<FacilityDeleteImpactDto>>> TenantFacilityDeleteImpact(Guid tenantId, Guid id, CancellationToken ct) =>
+        Ok(ApiResponse<FacilityDeleteImpactDto>.Ok(await facilityHandler.GetDeleteImpactAsync(id, ct)));
+
+    [HttpDelete("tenants/{tenantId:guid}/facilities/{id:guid}")]
+    public async Task<ActionResult<ApiResponse>> DeleteTenantFacility(Guid tenantId, Guid id, CancellationToken ct)
+    {
+        await facilityHandler.DeleteAsync(id, ct);
+        return Ok(ApiResponse.Ok());
+    }
 }

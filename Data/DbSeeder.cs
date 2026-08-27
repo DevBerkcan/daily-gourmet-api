@@ -30,6 +30,40 @@ public static class DbSeeder
         return new Guid(hash);
     }
 
+    /// <summary>Single source of truth for the flag catalog — read by both SeedAsync (fresh, empty
+    /// database) and EnsureFeatureFlagsExistAsync (an already-seeded database, run unconditionally
+    /// at every normal startup so a newly-added flag here still reaches it without a migration).</summary>
+    private static readonly (string Key, string Name, string? Description, bool DefaultEnabled)[] FeatureFlagCatalog =
+    [
+        ("kundenportal", "Kundenportal", "Schaltet den gesamten Kundenportal-Bereich (/portal) für Einrichtungen frei.", true),
+        ("naehrwert-api", "Nährwert-API (Zutaten)", "Automatischer Nährwert-Abgleich für Zutaten (Bundeslebensmittelschlüssel).", true),
+        ("einkaufslisten", "Einkaufslisten", "Erzeugen von Einkaufslisten aus Produktionsplänen.", true),
+        ("bedarfsprognose", "Bedarfsprognose (Basis)", "Reserviert für eine künftige Bedarfsprognose-Funktion.", false),
+        ("white-label", "White-Label-Branding", "Zeigt das hinterlegte Mandanten-Logo statt des Daily-Gourmet-Logos in der App.", false),
+        ("mehrsprachigkeit", "Mehrsprachigkeit", "Reserviert für eine künftige Mehrsprachigkeits-Funktion.", false),
+        ("facility-auto-invite", "Automatische Einladung beim Anlegen einer Einrichtung", "Legt beim Anlegen einer Einrichtung automatisch einen eingeladenen FACILITY_ADMIN-Zugang für die hinterlegte E-Mail an.", true),
+        ("impersonation-audit-visible-to-tenant", "Impersonation im Mandanten-Audit-Log sichtbar", "Zeigt Support-Sitzungen/Impersonation des Super Admin auch im Audit-Log des Mandanten selbst.", false),
+        ("tenant-self-serve-profile", "Mandant darf eigenes Profil bearbeiten", "Reserviert: erlaubt einem Mandanten künftig, Stammdaten/Branding selbst zu pflegen (aktuell nur durch Daily Gourmet).", false),
+        ("support-tenant-attachments", "Bildanhänge in Support-Tickets", "Erlaubt Mandanten, Screenshots an Support-Tickets anzuhängen.", true),
+        ("revenue-export", "Umsatzauswertung", "Schaltet die Umsatzauswertung (/admin/revenue) frei.", true),
+        ("driver-problem-photo", "Foto bei Problemmeldung (Fahrer)", "Reserviert: künftig kann ein Fahrer bei einer Problemmeldung ein Foto anhängen.", false),
+    ];
+
+    /// <summary>Idempotent upsert of the flag catalog by Key — run unconditionally at every normal
+    /// startup (not just SeedAsync's once-on-an-empty-database path) so a flag added to
+    /// FeatureFlagCatalog after go-live still reaches an already-seeded/production database.</summary>
+    public static async Task EnsureFeatureFlagsExistAsync(DailyGourmetDbContext db)
+    {
+        var existingKeys = (await db.FeatureFlags.IgnoreQueryFilters().Select(f => f.Key).ToListAsync()).ToHashSet();
+        var missing = FeatureFlagCatalog.Where(f => !existingKeys.Contains(f.Key)).ToList();
+        if (missing.Count == 0) return;
+
+        var now = DateTime.UtcNow;
+        foreach (var f in missing)
+            db.FeatureFlags.Add(new FeatureFlag { Id = Guid.NewGuid(), Key = f.Key, Name = f.Name, Description = f.Description, DefaultEnabled = f.DefaultEnabled, CreatedAt = now });
+        await db.SaveChangesAsync();
+    }
+
     public static async Task SeedAsync(DailyGourmetDbContext db)
     {
         if (await db.Tenants.IgnoreQueryFilters().AnyAsync())
@@ -70,20 +104,11 @@ public static class DbSeeder
             new TenantNotificationSetting { Id = G("T1N4"), TenantId = tenantId, EventKey = "ProductionPlanChanged", Enabled = false, CreatedAt = now });
 
         // ---- Feature flags (global) ----
-        var flags = new[]
-        {
-            (Key: "kundenportal", Name: "Kundenportal", Enabled: true),
-            (Key: "naehrwert-api", Name: "Nährwert-API (Zutaten)", Enabled: true),
-            (Key: "einkaufslisten", Name: "Einkaufslisten", Enabled: true),
-            (Key: "bedarfsprognose", Name: "Bedarfsprognose (Basis)", Enabled: false),
-            (Key: "white-label", Name: "White-Label-Branding", Enabled: false),
-            (Key: "mehrsprachigkeit", Name: "Mehrsprachigkeit", Enabled: false),
-        };
-        foreach (var f in flags)
+        foreach (var f in FeatureFlagCatalog)
         {
             var id = G("FF-" + f.Key);
-            db.FeatureFlags.Add(new FeatureFlag { Id = id, Key = f.Key, Name = f.Name, DefaultEnabled = f.Enabled, CreatedAt = now });
-            db.TenantFeatureFlags.Add(new TenantFeatureFlag { TenantId = tenantId, FeatureFlagId = id, Enabled = f.Enabled });
+            db.FeatureFlags.Add(new FeatureFlag { Id = id, Key = f.Key, Name = f.Name, Description = f.Description, DefaultEnabled = f.DefaultEnabled, CreatedAt = now });
+            db.TenantFeatureFlags.Add(new TenantFeatureFlag { TenantId = tenantId, FeatureFlagId = id, Enabled = f.DefaultEnabled });
         }
 
         // ---- Lookups ----

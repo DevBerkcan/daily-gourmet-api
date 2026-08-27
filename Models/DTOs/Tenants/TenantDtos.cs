@@ -89,6 +89,15 @@ public class SetTenantFeatureFlagDto
     public bool Enabled { get; set; }
 }
 
+/// <summary>Resolved is-enabled status of one flag for the caller's own tenant — the shape returned
+/// by GET /api/feature-flags (FeatureFlagsController), which tenant-side frontend code reads to
+/// gate UI/behavior via useFeatureFlag(key).</summary>
+public class TenantFeatureFlagStatusDto
+{
+    public string Key { get; set; } = string.Empty;
+    public bool Enabled { get; set; }
+}
+
 public class LocationDto
 {
     public Guid Id { get; set; }

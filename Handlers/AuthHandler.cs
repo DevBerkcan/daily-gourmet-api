@@ -5,6 +5,7 @@ using DailyGourmet.Api.Models.DTOs.Auth;
 using DailyGourmet.Api.Models.Entities;
 using DailyGourmet.Api.Models.Enums;
 using DailyGourmet.Api.Repositories.Interfaces;
+using DailyGourmet.Api.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,7 +16,8 @@ public class AuthHandler(
     IJwtTokenService tokenService,
     IPasswordHasher<User> passwordHasher,
     ITenantContext tenantContext,
-    DailyGourmetDbContext db)
+    DailyGourmetDbContext db,
+    IFeatureFlagService featureFlags)
 {
     private const int MaxFailedAttempts = 5;
     private static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
@@ -58,7 +60,29 @@ public class AuthHandler(
         var user = await users.GetByIdIgnoringTenantAsync(userId, ct)
             ?? throw new UnauthorizedException();
 
-        return await BuildCurrentUserDtoAsync(user, ct);
+        var dto = await BuildCurrentUserDtoAsync(user, ct);
+
+        // Under impersonation, `user` is still the real super admin's own row (see
+        // GenerateImpersonationToken's `sub` choice) — its own TenantId/Role are always null/
+        // SUPER_ADMIN, so every field describing "who am I acting as" must be overridden from the
+        // impersonation claims instead, or the frontend would show the super admin's own identity
+        // mid-impersonation rather than the tenant's.
+        if (tenantContext.IsImpersonation && tenantContext.TenantId is { } impersonatedTenantId)
+        {
+            dto.TenantId = impersonatedTenantId;
+            dto.TenantName = await db.Tenants.IgnoreQueryFilters().Where(t => t.Id == impersonatedTenantId).Select(t => t.Name).FirstOrDefaultAsync(ct);
+            dto.FacilityId = null;
+            dto.FacilityName = null;
+            dto.Role = tenantContext.Role ?? dto.Role;
+            dto.IsImpersonation = true;
+            dto.LogoUrl = await featureFlags.IsEnabledAsync(impersonatedTenantId, "white-label", ct)
+                ? await db.TenantProfiles.IgnoreQueryFilters().Where(p => p.TenantId == impersonatedTenantId).Select(p => p.LogoUrl).FirstOrDefaultAsync(ct)
+                : null;
+            if (tenantContext.ImpersonationSessionId is { } sessionId)
+                dto.ImpersonationExpiresAtUtc = await db.SupportSessions.IgnoreQueryFilters().Where(s => s.Id == sessionId).Select(s => (DateTime?)s.ExpiresAtUtc).FirstOrDefaultAsync(ct);
+        }
+
+        return dto;
     }
 
     public async Task<InvitationDetailsDto> GetInvitationAsync(string token, CancellationToken ct = default)
@@ -108,6 +132,10 @@ public class AuthHandler(
             await db.SupportSessions.IgnoreQueryFilters()
                 .AnyAsync(s => s.TenantId == tid && s.EndedAtUtc == null && s.ExpiresAtUtc > DateTime.UtcNow, ct);
 
+        string? logoUrl = null;
+        if (user.TenantId is { } logoTenantId && await featureFlags.IsEnabledAsync(logoTenantId, "white-label", ct))
+            logoUrl = await db.TenantProfiles.IgnoreQueryFilters().Where(p => p.TenantId == logoTenantId).Select(p => p.LogoUrl).FirstOrDefaultAsync(ct);
+
         return new CurrentUserDto
         {
             Id = user.Id,
@@ -119,6 +147,7 @@ public class AuthHandler(
             Email = user.Email,
             Role = user.Role.ToString(),
             ActiveSupportSession = activeSession,
+            LogoUrl = logoUrl,
         };
     }
 }

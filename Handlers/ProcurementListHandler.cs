@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class ProcurementListHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IEmailService emailService, IPdfService pdfService, IOptions<AppOptions> appOptions)
+public class ProcurementListHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IEmailService emailService, IPdfService pdfService, IOptions<AppOptions> appOptions, IFeatureFlagService featureFlags)
 {
     private static readonly string[] StatusOrder = ["DRAFT", "REVIEWED", "READY_FOR_APPROVAL", "APPROVED", "ORDERED", "COMPLETED"];
 
@@ -47,6 +47,9 @@ public class ProcurementListHandler(DailyGourmetDbContext db, ITenantContext ten
     /// Returns the first created list's id — callers list all of them via ListAsync(calendarWeek:).</summary>
     public async Task<ProcurementListDto> GenerateAsync(GenerateProcurementListDto dto, CancellationToken ct = default)
     {
+        if (!await featureFlags.IsEnabledAsync(tenantContext.TenantId!.Value, "einkaufslisten", ct))
+            throw new ForbiddenException("Einkaufslisten sind für Ihren Mandanten nicht aktiviert.");
+
         var plan = await db.ProductionPlans.Include(p => p.Items).ThenInclude(i => i.Recipe).ThenInclude(r => r.Ingredients).ThenInclude(ri => ri.Ingredient)
             .FirstOrDefaultAsync(p => p.Id == dto.ProductionPlanId, ct) ?? throw new NotFoundException(nameof(ProductionPlan), dto.ProductionPlanId);
 

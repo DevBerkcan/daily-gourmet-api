@@ -25,6 +25,8 @@ public class NotificationHandler(DailyGourmetDbContext db, ITenantContext tenant
     public async Task MarkReadAsync(Guid id, CancellationToken ct = default)
     {
         var notification = await db.Notifications.FirstOrDefaultAsync(n => n.Id == id, ct) ?? throw new NotFoundException(nameof(Notification), id);
+        if (notification.RecipientUserId is { } recipient && recipient != tenantContext.UserId)
+            throw new ForbiddenException("Kein Zugriff auf die Benachrichtigung eines anderen Benutzers.");
         notification.IsRead = true;
         notification.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);

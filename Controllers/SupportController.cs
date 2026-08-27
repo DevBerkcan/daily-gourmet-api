@@ -81,6 +81,10 @@ public class SupportSessionsController(SupportSessionHandler handler) : Controll
     public async Task<ActionResult<ApiResponse<SupportSessionDto>>> Start(Guid tenantId, CancellationToken ct) =>
         Ok(ApiResponse<SupportSessionDto>.Ok(await handler.StartAsync(tenantId, ct)));
 
+    [HttpPost("support-sessions/{sessionId:guid}/impersonate")]
+    public async Task<ActionResult<ApiResponse<ImpersonationTokenDto>>> Impersonate(Guid sessionId, CancellationToken ct) =>
+        Ok(ApiResponse<ImpersonationTokenDto>.Ok(await handler.ImpersonateAsync(sessionId, ct)));
+
     [HttpDelete("support-sessions/{id:guid}")]
     public async Task<ActionResult<ApiResponse>> End(Guid id, CancellationToken ct)
     {

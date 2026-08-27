@@ -30,11 +30,34 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
 
         var failedLogins = await db.Users.IgnoreQueryFilters().CountAsync(u => u.FailedLoginCount > 0 && u.LastLoginAt != null && u.LastLoginAt >= DateTime.UtcNow.AddHours(-24), ct);
 
+        var topTenants = await db.Orders.IgnoreQueryFilters()
+            .Where(o => o.MealPlan.CalendarWeek == week && o.MealPlan.Year == year)
+            .GroupBy(o => o.Tenant.Name)
+            .Select(g => new TenantOrderCountDto { TenantName = g.Key, OrderCount = g.Count() })
+            .OrderByDescending(x => x.OrderCount)
+            .Take(5)
+            .ToListAsync(ct);
+
+        var lockedOutUsers = await db.Users.IgnoreQueryFilters().Include(u => u.Tenant)
+            .Where(u => u.LockedUntil != null && u.LockedUntil > DateTime.UtcNow)
+            .OrderByDescending(u => u.LockedUntil)
+            .Select(u => new LockedUserDto { Name = u.Name, Email = u.Email, TenantName = u.Tenant != null ? u.Tenant.Name : null, LockedUntil = u.LockedUntil!.Value })
+            .ToListAsync(ct);
+
+        var ticketsWithSuperAdminReply = await db.SupportTickets.IgnoreQueryFilters().Include(t => t.Replies)
+            .Where(t => t.Replies.Any(r => r.Role == SupportReplyRole.SUPER_ADMIN))
+            .ToListAsync(ct);
+        double? avgFirstResponseMinutes = ticketsWithSuperAdminReply.Count == 0 ? null : ticketsWithSuperAdminReply
+            .Select(t => (t.Replies.Where(r => r.Role == SupportReplyRole.SUPER_ADMIN).OrderBy(r => r.CreatedAt).First().CreatedAt - t.CreatedAt).TotalMinutes)
+            .Average();
+
         return new SuperAdminDashboardDto
         {
             TenantCountsByStatus = tenantCounts.ToDictionary(x => x.Status, x => x.Count),
             TotalUsers = totalUsers, ActiveUsersLast7Days = activeLast7Days, TotalFacilities = totalFacilities,
             ThisWeekOrderCount = thisWeekOrders, FailedLoginsLast24h = failedLogins,
+            TopTenantsByOrdersThisWeek = topTenants, CurrentlyLockedOutUsers = lockedOutUsers,
+            AverageFirstResponseMinutes = avgFirstResponseMinutes,
         };
     }
 
@@ -178,6 +201,65 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
         return ToUserDto(user, tenant?.Name, facilityName);
     }
 
+    public async Task<UserDto> UpdateUserAsync(Guid id, SuperAdminUpdateUserDto dto, CancellationToken ct = default)
+    {
+        var user = await db.Users.IgnoreQueryFilters().Include(u => u.Tenant).Include(u => u.Facility).FirstOrDefaultAsync(u => u.Id == id, ct)
+            ?? throw new NotFoundException(nameof(User), id);
+        if (!Enum.TryParse<Role>(dto.Role, out var role)) throw new ValidationException("Ungültige Rolle.");
+
+        if (dto.FacilityId is { } fid)
+        {
+            var facilityBelongsToTenant = await db.Facilities.IgnoreQueryFilters().AnyAsync(f => f.Id == fid && f.TenantId == user.TenantId, ct);
+            if (!facilityBelongsToTenant) throw new ValidationException("Die Einrichtung gehört nicht zum Mandanten dieses Benutzers.");
+        }
+
+        user.Name = dto.Name.Trim();
+        user.Role = role;
+        user.FacilityId = dto.FacilityId;
+        user.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        string? facilityName = user.FacilityId is { } resultFid
+            ? await db.Facilities.IgnoreQueryFilters().Where(f => f.Id == resultFid).Select(f => f.Name).FirstOrDefaultAsync(ct)
+            : null;
+        return ToUserDto(user, user.Tenant?.Name, facilityName);
+    }
+
+    public async Task SetUserStatusAsync(Guid id, UserStatus status, CancellationToken ct = default)
+    {
+        var user = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == id, ct) ?? throw new NotFoundException(nameof(User), id);
+        user.Status = status;
+        user.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Admin-triggered password reset for an already-active user — reuses the exact same
+    /// invitation-token machinery as UserManagementHandler.ResendInvitationAsync.
+    /// AuthHandler.AcceptInvitationAsync already sets a new password for a user found by a valid
+    /// token regardless of their current Status, so no separate "forgot password" flow is needed:
+    /// regenerating the token and re-sending the link is the whole reset.</summary>
+    public async Task TriggerPasswordResetAsync(Guid id, CancellationToken ct = default)
+    {
+        var user = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == id, ct) ?? throw new NotFoundException(nameof(User), id);
+        user.InvitationToken = Guid.NewGuid().ToString("N");
+        user.InvitationExpiresAt = DateTime.UtcNow.AddHours(72);
+        await db.SaveChangesAsync(ct);
+        await SendPasswordResetEmailAsync(user);
+    }
+
+    private async Task SendPasswordResetEmailAsync(User user)
+    {
+        var baseUrl = appOptions.Value.PublicBaseUrl.TrimEnd('/');
+        var resetUrl = $"{baseUrl}/accept-invite/{user.InvitationToken}";
+        var html = $"""
+            <p>Für Ihr Daily-Gourmet-Konto wurde ein Zurücksetzen des Passworts angefordert. Klicken Sie auf den folgenden Link, um ein neues Passwort festzulegen:</p>
+            <p><a href="{resetUrl}">Passwort zurücksetzen</a></p>
+            <p>Der Link ist 72 Stunden gültig. Haben Sie dies nicht angefordert, können Sie diese E-Mail ignorieren.</p>
+            """;
+        var text = $"Für Ihr Daily-Gourmet-Konto wurde ein Zurücksetzen des Passworts angefordert. Neues Passwort festlegen: {resetUrl}\nDer Link ist 72 Stunden gültig.";
+        await email.SendAsync(user.Email, user.Name, "Passwort zurücksetzen — Daily Gourmet", html, text);
+    }
+
     private async Task SendInvitationEmailAsync(User user, string token)
     {
         var baseUrl = appOptions.Value.PublicBaseUrl.TrimEnd('/');
@@ -191,8 +273,19 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
         await email.SendAsync(user.Email, user.Name, "Einladung zu Daily Gourmet", html, text);
     }
 
-    public async Task<List<FeatureFlagDto>> ListFeatureFlagsAsync(CancellationToken ct = default) =>
-        await db.FeatureFlags.OrderBy(f => f.Name).Select(f => new FeatureFlagDto { Id = f.Id, Key = f.Key, Name = f.Name, Description = f.Description, DefaultEnabled = f.DefaultEnabled }).ToListAsync(ct);
+    public async Task<List<FeatureFlagDto>> ListFeatureFlagsAsync(Guid? tenantId, CancellationToken ct = default)
+    {
+        var flags = await db.FeatureFlags.OrderBy(f => f.Name).ToListAsync(ct);
+        var overrides = tenantId is { } tid
+            ? await db.TenantFeatureFlags.Where(x => x.TenantId == tid).ToDictionaryAsync(x => x.FeatureFlagId, x => x.Enabled, ct)
+            : new Dictionary<Guid, bool>();
+
+        return flags.Select(f => new FeatureFlagDto
+        {
+            Id = f.Id, Key = f.Key, Name = f.Name, Description = f.Description, DefaultEnabled = f.DefaultEnabled,
+            TenantEnabled = tenantId is null ? null : (overrides.TryGetValue(f.Id, out var v) ? v : (bool?)null),
+        }).ToList();
+    }
 
     public async Task<FeatureFlagDto> UpdateFeatureFlagAsync(Guid id, UpdateFeatureFlagDto dto, CancellationToken ct = default)
     {
@@ -215,10 +308,31 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task<List<LocationSummaryDto>> AllLocationsAsync(CancellationToken ct = default) =>
-        await db.Locations.IgnoreQueryFilters().Include(l => l.Tenant)
-            .Select(l => new LocationSummaryDto { Id = l.Id, Name = l.Name, TenantName = l.Tenant.Name })
-            .ToListAsync(ct);
+    /// <summary>How many tenants actually have each flag on, resolving each tenant's own override
+    /// (falling back to the flag's DefaultEnabled where no override exists) — answers "how many
+    /// tenants have kundenportal on" using data that's already fully captured in TenantFeatureFlag.</summary>
+    public async Task<List<FeatureFlagAdoptionDto>> FeatureFlagAdoptionAsync(CancellationToken ct = default)
+    {
+        var totalTenants = await db.Tenants.IgnoreQueryFilters().CountAsync(ct);
+        var flags = await db.FeatureFlags.OrderBy(f => f.Name).ToListAsync(ct);
+        var overrides = await db.TenantFeatureFlags.ToListAsync(ct);
+
+        return flags.Select(f =>
+        {
+            var flagOverrides = overrides.Where(o => o.FeatureFlagId == f.Id).ToList();
+            var explicitlyOnCount = flagOverrides.Count(o => o.Enabled);
+            var tenantsWithoutOverride = totalTenants - flagOverrides.Count;
+            var enabledCount = explicitlyOnCount + (f.DefaultEnabled ? tenantsWithoutOverride : 0);
+            return new FeatureFlagAdoptionDto { Key = f.Key, Name = f.Name, EnabledTenantCount = enabledCount, TotalTenantCount = totalTenants };
+        }).ToList();
+    }
+
+    public async Task<List<LocationSummaryDto>> AllLocationsAsync(Guid? tenantId = null, CancellationToken ct = default)
+    {
+        var query = db.Locations.IgnoreQueryFilters().Include(l => l.Tenant).AsQueryable();
+        if (tenantId is { } tid) query = query.Where(l => l.TenantId == tid);
+        return await query.Select(l => new LocationSummaryDto { Id = l.Id, Name = l.Name, TenantName = l.Tenant.Name }).ToListAsync(ct);
+    }
 
     private async Task<TenantDto> ToTenantDtoAsync(Tenant t, CancellationToken ct) => new()
     {

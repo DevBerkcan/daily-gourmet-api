@@ -24,8 +24,13 @@ public class UserManagementHandler(IRepository<User> users, ITenantContext tenan
         return new PagedResult<UserDto> { Items = items.Select(ToDto).ToList(), Total = total, Page = page, PageSize = pageSize };
     }
 
-    public async Task<UserDto> GetByIdAsync(Guid id, CancellationToken ct = default) =>
-        ToDto(await users.Query().Include(u => u.Facility).FirstOrDefaultAsync(u => u.Id == id, ct) ?? throw new NotFoundException(nameof(User), id));
+    public async Task<UserDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var user = await users.Query().Include(u => u.Facility).FirstOrDefaultAsync(u => u.Id == id, ct) ?? throw new NotFoundException(nameof(User), id);
+        if (tenantContext.Role is "FACILITY_ADMIN" or "FACILITY_USER" && user.FacilityId != tenantContext.FacilityId)
+            throw new ForbiddenException("Kein Zugriff auf Benutzer einer anderen Einrichtung.");
+        return ToDto(user);
+    }
 
     public async Task<UserDto> InviteAsync(InviteUserDto dto, CancellationToken ct = default)
     {

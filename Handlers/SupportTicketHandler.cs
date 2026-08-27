@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class SupportTicketHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IFileStorageService fileStorage)
+public class SupportTicketHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IFileStorageService fileStorage, IImageHostingService imageHosting, IFeatureFlagService featureFlags)
 {
     private static IQueryable<SupportTicket> FullQuery(DailyGourmetDbContext db) => db.SupportTickets
         .Include(t => t.CreatedByUser)
@@ -72,18 +72,28 @@ public class SupportTicketHandler(DailyGourmetDbContext db, ITenantContext tenan
         return await GetByIdAsync(id, ct);
     }
 
+    /// <summary>Images only — uploaded straight to imgbb (IImageHostingService), stored as a public
+    /// ExternalUrl. IFileStorageService/StorageKey remains only for attachments uploaded before this
+    /// switch (see GetAttachmentAsync); this method never writes to local disk anymore.</summary>
     public async Task<SupportTicketAttachmentDto> AddAttachmentAsync(Guid ticketId, IFormFile file, CancellationToken ct = default)
     {
         var ticket = await db.SupportTickets.FirstOrDefaultAsync(t => t.Id == ticketId, ct) ?? throw new NotFoundException(nameof(SupportTicket), ticketId);
         if (file.Length == 0) throw new ValidationException("Keine Datei übermittelt.");
+        if (!file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            throw new ValidationException("Nur Bilddateien (Screenshots) können angehängt werden.");
+        // tenantContext.TenantId is null for a super admin replying on a ticket — the flag only ever
+        // gates tenant-side uploads, so a super admin isn't blocked by a tenant's own setting.
+        if (tenantContext.TenantId is { } tid && !await featureFlags.IsEnabledAsync(tid, "support-tenant-attachments", ct))
+            throw new ForbiddenException("Anhänge sind für Ihren Mandanten derzeit nicht verfügbar.");
 
         await using var stream = file.OpenReadStream();
-        var storageKey = await fileStorage.SaveAsync(ticketId.ToString(), file.FileName, stream, ct);
+        var upload = await imageHosting.UploadAsync(stream, file.FileName, ct);
 
         var attachment = new SupportTicketAttachment
         {
             Id = Guid.NewGuid(), TicketId = ticketId, UploadedByUserId = tenantContext.UserId!.Value,
-            FileName = file.FileName, ContentType = file.ContentType, SizeBytes = file.Length, StorageKey = storageKey, CreatedAt = DateTime.UtcNow,
+            FileName = file.FileName, ContentType = file.ContentType, SizeBytes = file.Length,
+            ExternalUrl = upload.Url, DeleteUrl = upload.DeleteUrl, CreatedAt = DateTime.UtcNow,
         };
         db.Set<SupportTicketAttachment>().Add(attachment);
         ticket.UpdatedAt = DateTime.UtcNow;
@@ -91,17 +101,21 @@ public class SupportTicketHandler(DailyGourmetDbContext db, ITenantContext tenan
         return ToAttachmentDto(attachment);
     }
 
+    /// <summary>Only reachable for legacy attachments uploaded before the imgbb switch (ExternalUrl
+    /// null, StorageKey set) — new attachments are served directly via their public ExternalUrl and
+    /// never need this authenticated download path.</summary>
     public async Task<(Stream Content, string ContentType, string FileName)> GetAttachmentAsync(Guid ticketId, Guid attachmentId, CancellationToken ct = default)
     {
         var attachment = await db.Set<SupportTicketAttachment>().FirstOrDefaultAsync(a => a.Id == attachmentId && a.TicketId == ticketId, ct)
             ?? throw new NotFoundException(nameof(SupportTicketAttachment), attachmentId);
+        if (attachment.StorageKey is null) throw new ValidationException("Dieser Anhang wird extern gehostet und hat keinen lokalen Download.");
         var stream = await fileStorage.OpenReadAsync(attachment.StorageKey, ct);
         return (stream, attachment.ContentType, attachment.FileName);
     }
 
     private static SupportTicketAttachmentDto ToAttachmentDto(SupportTicketAttachment a) => new()
     {
-        Id = a.Id, FileName = a.FileName, ContentType = a.ContentType, SizeBytes = a.SizeBytes, CreatedAt = a.CreatedAt,
+        Id = a.Id, FileName = a.FileName, ContentType = a.ContentType, SizeBytes = a.SizeBytes, CreatedAt = a.CreatedAt, Url = a.ExternalUrl,
     };
 
     private static SupportTicketDto ToDto(SupportTicket t) => new()

@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using DailyGourmet.Api.Models.Entities;
+using DailyGourmet.Api.Models.Enums;
 using DailyGourmet.Api.Options;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -13,6 +14,9 @@ public static class DgClaimTypes
 {
     public const string TenantId = "tenantId";
     public const string FacilityId = "facilityId";
+    public const string IsImpersonation = "isImpersonation";
+    public const string ImpersonatedBySuperAdminId = "impersonatedBy";
+    public const string SupportSessionId = "supportSessionId";
 }
 
 public class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenService
@@ -45,6 +49,40 @@ public class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenService
             audience: _options.Audience,
             claims: claims,
             expires: DateTime.UtcNow.AddMinutes(_options.ExpirationMinutes),
+            signingCredentials: credentials);
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    public string GenerateImpersonationToken(User superAdmin, Guid targetTenantId, Guid supportSessionId, DateTime expiresAtUtc)
+    {
+        if (string.IsNullOrWhiteSpace(_options.Secret))
+            throw new InvalidOperationException("Jwt:Secret is not configured. Set it via environment variable or user-secrets, never commit it.");
+
+        var claims = new List<Claim>
+        {
+            new(JwtRegisteredClaimNames.Sub, superAdmin.Id.ToString()),
+            new(JwtRegisteredClaimNames.Email, superAdmin.Email),
+            new(ClaimTypes.Name, superAdmin.Name),
+            // Effective role while impersonating is TENANT_ADMIN — not SUPER_ADMIN — so this token
+            // can't reach any SUPER_ADMIN-only endpoint, and every existing
+            // [Authorize(Roles="TENANT_OWNER,TENANT_ADMIN")] check works without modification.
+            new(ClaimTypes.Role, Role.TENANT_ADMIN.ToString()),
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new(DgClaimTypes.TenantId, targetTenantId.ToString()),
+            new(DgClaimTypes.IsImpersonation, "true"),
+            new(DgClaimTypes.ImpersonatedBySuperAdminId, superAdmin.Id.ToString()),
+            new(DgClaimTypes.SupportSessionId, supportSessionId.ToString()),
+        };
+
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.Secret));
+        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var token = new JwtSecurityToken(
+            issuer: _options.Issuer,
+            audience: _options.Audience,
+            claims: claims,
+            expires: expiresAtUtc,
             signingCredentials: credentials);
 
         return new JwtSecurityTokenHandler().WriteToken(token);

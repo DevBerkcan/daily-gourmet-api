@@ -28,6 +28,14 @@ public class CurrentUserDto
     public string Email { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
     public bool ActiveSupportSession { get; set; }
+    /// <summary>Set only when the white-label flag is enabled for this tenant AND a logo is
+    /// configured — the frontend app shell shows this instead of the default Daily Gourmet logo.</summary>
+    public string? LogoUrl { get; set; }
+    /// <summary>True when this /auth/me response reflects an active impersonation token (see
+    /// SupportSessionHandler.ImpersonateAsync) — every field above already describes the
+    /// impersonated tenant, not the super admin's own account.</summary>
+    public bool IsImpersonation { get; set; }
+    public DateTime? ImpersonationExpiresAtUtc { get; set; }
 }
 
 /// <summary>Shown on the public "set your password" page before the user submits one — lets the

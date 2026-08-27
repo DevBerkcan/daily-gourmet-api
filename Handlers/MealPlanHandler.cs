@@ -7,11 +7,12 @@ using DailyGourmet.Api.Models.DTOs;
 using DailyGourmet.Api.Models.DTOs.MealPlans;
 using DailyGourmet.Api.Models.Entities;
 using DailyGourmet.Api.Models.Enums;
+using DailyGourmet.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantContext)
+public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IFeatureFlagService featureFlags)
 {
     private static readonly string[] Weekdays = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"];
 
@@ -196,6 +197,8 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
     public async Task<List<MealPlanDto>> PortalListAsync(CancellationToken ct = default)
     {
         var facilityId = tenantContext.FacilityId ?? throw new ForbiddenException("Kein Einrichtungskontext vorhanden.");
+        if (!await featureFlags.IsEnabledAsync(tenantContext.TenantId!.Value, "kundenportal", ct))
+            throw new ForbiddenException("Das Kundenportal ist für Ihren Mandanten nicht aktiviert.");
         var plans = await FullQuery(db)
             .Where(m => m.Facilities.Any(f => f.FacilityId == facilityId) &&
                         (m.Status == MealPlanStatus.PUBLISHED || m.Status == MealPlanStatus.CLOSED || m.Status == MealPlanStatus.ARCHIVED))

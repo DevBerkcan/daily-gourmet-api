@@ -18,6 +18,9 @@ public class FacilityDto
     public string Status { get; set; } = string.Empty;
     public string? Notes { get; set; }
     public string? RouteNumber { get; set; }
+    /// <summary>True only on the response to a Create call that actually sent a FACILITY_ADMIN
+    /// invite for this facility's Email — lets the frontend show a richer confirmation message.</summary>
+    public bool AdminInvited { get; set; }
 }
 
 public class CreateFacilityDto
@@ -25,19 +28,18 @@ public class CreateFacilityDto
     [Required, MaxLength(200)]
     public string Name { get; set; } = string.Empty;
 
-    [MaxLength(300)]
+    [Required, MaxLength(300)]
     public string Address { get; set; } = string.Empty;
 
-    [MaxLength(200)]
+    [Required, MaxLength(200)]
     public string ContactPerson { get; set; } = string.Empty;
 
-    // Nullable, nicht nur optional durch fehlendes [Required]: [EmailAddress] hält einen leeren
-    // String (anders als null) für ein ungültiges Format und lehnt ihn ab — ohne diese Nullability
-    // schlägt das Speichern ohne erkennbaren Grund fehl, sobald das E-Mail-Feld leer bleibt.
-    [EmailAddress, MaxLength(256)]
-    public string? Email { get; set; }
+    // Required: this email is also used to auto-invite the facility's FACILITY_ADMIN login
+    // (see FacilityHandler.CreateAsync), so it can no longer be left blank.
+    [Required, EmailAddress, MaxLength(256)]
+    public string Email { get; set; } = string.Empty;
 
-    [MaxLength(50)]
+    [Required, MaxLength(50)]
     public string Phone { get; set; } = string.Empty;
 
     [Required]
@@ -82,15 +84,25 @@ public class SaveFacilityClosureDto
 /// bleiben Verwaltungssache und sind hier nicht änderbar.</summary>
 public class UpdatePortalFacilityDto
 {
-    [MaxLength(300)]
+    [Required, MaxLength(300)]
     public string Address { get; set; } = string.Empty;
 
-    [MaxLength(200)]
+    [Required, MaxLength(200)]
     public string ContactPerson { get; set; } = string.Empty;
 
-    [EmailAddress, MaxLength(256)]
-    public string? Email { get; set; }
+    [Required, EmailAddress, MaxLength(256)]
+    public string Email { get; set; } = string.Empty;
 
-    [MaxLength(50)]
+    [Required, MaxLength(50)]
     public string Phone { get; set; } = string.Empty;
+}
+
+/// <summary>Preview of what a hard Facility delete would take with it — shown in the confirmation
+/// dialog before DeleteAsync actually runs.</summary>
+public class FacilityDeleteImpactDto
+{
+    public int OrderCount { get; set; }
+    public int ClosureCount { get; set; }
+    public int UserCount { get; set; }
+    public int RouteStopCount { get; set; }
 }

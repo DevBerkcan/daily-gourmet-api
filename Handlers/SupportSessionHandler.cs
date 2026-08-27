@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class SupportSessionHandler(DailyGourmetDbContext db, ITenantContext tenantContext)
+public class SupportSessionHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IJwtTokenService tokenService)
 {
     public async Task<SupportSessionDto> StartAsync(Guid tenantId, CancellationToken ct = default)
     {
@@ -45,6 +45,23 @@ public class SupportSessionHandler(DailyGourmetDbContext db, ITenantContext tena
         var tenantName = await db.Tenants.IgnoreQueryFilters().Where(t => t.Id == tenantId).Select(t => t.Name).FirstOrDefaultAsync(ct) ?? string.Empty;
         var startedByName = (await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == session.StartedByUserId, ct))?.Name ?? string.Empty;
         return ToDto(session, tenantName, startedByName);
+    }
+
+    /// <summary>Mints the short-lived impersonation JWT the super admin swaps to in order to actually
+    /// browse the tenant's admin UI as that tenant. Requires the session to still be active — a
+    /// support session that's already expired/ended can't be used to start impersonating.</summary>
+    public async Task<ImpersonationTokenDto> ImpersonateAsync(Guid sessionId, CancellationToken ct = default)
+    {
+        var session = await db.SupportSessions.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(s => s.Id == sessionId && s.EndedAtUtc == null && s.ExpiresAtUtc > DateTime.UtcNow, ct)
+            ?? throw new ConflictException("Diese Supportsitzung ist nicht mehr aktiv.");
+
+        var superAdmin = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == tenantContext.UserId, ct)
+            ?? throw new UnauthorizedException();
+        var tenantName = await db.Tenants.IgnoreQueryFilters().Where(t => t.Id == session.TenantId).Select(t => t.Name).FirstOrDefaultAsync(ct) ?? string.Empty;
+
+        var token = tokenService.GenerateImpersonationToken(superAdmin, session.TenantId, session.Id, session.ExpiresAtUtc);
+        return new ImpersonationTokenDto { Token = token, TenantName = tenantName, ExpiresAtUtc = session.ExpiresAtUtc };
     }
 
     public async Task EndAsync(Guid id, CancellationToken ct = default)
