@@ -5,6 +5,9 @@ namespace DailyGourmet.Api.Models.DTOs.Recipes;
 
 public class RecipeIngredientDto
 {
+    /// <summary>The RecipeIngredient row's own id — not the ingredient's — so duplicate ingredient
+    /// rows in one recipe (see comment on RecipeIngredient) still get a stable, unique key.</summary>
+    public Guid Id { get; set; }
     public Guid IngredientId { get; set; }
     public string IngredientName { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
@@ -114,6 +117,7 @@ public class SaveRecipeDto
 
 public class RecipeScaleIngredientDto
 {
+    public Guid Id { get; set; }
     public Guid IngredientId { get; set; }
     public string IngredientName { get; set; } = string.Empty;
     public decimal OriginalQuantity { get; set; }
@@ -136,6 +140,7 @@ public class RecipeScaleResultDto
 /// dann 0, nicht weil die Zutat keine Kalorien hätte, sondern weil der Wert schlicht noch fehlt.</summary>
 public class RecipeNutritionIngredientRowDto
 {
+    public Guid Id { get; set; }
     public Guid IngredientId { get; set; }
     public string IngredientName { get; set; } = string.Empty;
     public decimal Quantity { get; set; }

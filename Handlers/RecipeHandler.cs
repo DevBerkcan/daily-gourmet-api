@@ -440,6 +440,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             Factor = decimal.Round(factor, 4),
             Ingredients = recipe.Ingredients.Select(ri => new RecipeScaleIngredientDto
             {
+                Id = ri.Id,
                 IngredientId = ri.IngredientId,
                 IngredientName = ri.Ingredient.Name,
                 OriginalQuantity = ri.Quantity,
@@ -512,6 +513,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
                 || n.SaltG != 0 || n.FiberG != 0 || n.SaturatedFatG != 0 || n.AlcoholG != 0 || n.Kj != 0;
             return new RecipeNutritionIngredientRowDto
             {
+                Id = ri.Id,
                 IngredientId = ri.IngredientId,
                 IngredientName = ri.Ingredient.Name,
                 Quantity = ri.Quantity,
@@ -736,7 +738,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             PrepSteps = r.PrepSteps.OrderBy(s => s.StepNumber).Select(s => s.Text).ToArray(),
             Ingredients = r.Ingredients.Select(ri => new RecipeIngredientDto
             {
-                IngredientId = ri.IngredientId, IngredientName = ri.Ingredient?.Name ?? string.Empty, Quantity = ri.Quantity, Unit = ri.Unit.ToString(),
+                Id = ri.Id, IngredientId = ri.IngredientId, IngredientName = ri.Ingredient?.Name ?? string.Empty, Quantity = ri.Quantity, Unit = ri.Unit.ToString(),
             }).ToList(),
             ResolvedAllergens = resolvedAllergens,
             AllergensAreOverridden = allergensOverridden,
