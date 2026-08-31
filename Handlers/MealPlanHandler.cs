@@ -7,12 +7,14 @@ using DailyGourmet.Api.Models.DTOs;
 using DailyGourmet.Api.Models.DTOs.MealPlans;
 using DailyGourmet.Api.Models.Entities;
 using DailyGourmet.Api.Models.Enums;
+using DailyGourmet.Api.Options;
 using DailyGourmet.Api.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IFeatureFlagService featureFlags, IEmailService email)
+public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IFeatureFlagService featureFlags, IEmailService email, IOptions<AppOptions> appOptions)
 {
     private static readonly string[] Weekdays = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"];
 
@@ -257,7 +259,8 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
 
     public async Task<MealPlanDto> PublishAsync(Guid id, CancellationToken ct = default)
     {
-        var plan = await db.MealPlans.Include(m => m.Days).ThenInclude(d => d.Items).ThenInclude(i => i.Recipe).ThenInclude(r => r.Nutrition)
+        var plan = await db.MealPlans.Include(m => m.Facilities)
+            .Include(m => m.Days).ThenInclude(d => d.Items).ThenInclude(i => i.Recipe).ThenInclude(r => r.Nutrition)
             .FirstOrDefaultAsync(m => m.Id == id, ct) ?? throw new NotFoundException(nameof(MealPlan), id);
         if (plan.Status != MealPlanStatus.REVIEW) throw new ConflictException("Nur Pläne in Prüfung können veröffentlicht werden.");
 
@@ -270,7 +273,36 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
         plan.Status = MealPlanStatus.PUBLISHED;
         plan.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+
+        await NotifyFacilitiesOfPublishAsync(plan, ct);
         return await GetByIdAsync(id, ct);
+    }
+
+    /// <summary>Tells every active facility user of a just-published plan that they can now view it
+    /// in the Kundenportal. Silently skipped when the tenant doesn't have kundenportal enabled — the
+    /// portal link in the email would otherwise 403 for every recipient (see PortalListAsync's own
+    /// gate on the same flag).</summary>
+    private async Task NotifyFacilitiesOfPublishAsync(MealPlan plan, CancellationToken ct)
+    {
+        if (plan.Facilities.Count == 0) return;
+        if (!await featureFlags.IsEnabledAsync(plan.TenantId, "kundenportal", ct)) return;
+
+        var facilityIds = plan.Facilities.Select(f => f.FacilityId).ToArray();
+        var empfaenger = await db.Users
+            .Where(u => u.FacilityId != null && facilityIds.Contains(u.FacilityId.Value) &&
+                        (u.Role == Role.FACILITY_ADMIN || u.Role == Role.FACILITY_USER) && u.Status == UserStatus.AKTIV)
+            .ToListAsync(ct);
+        if (empfaenger.Count == 0) return;
+
+        var baseUrl = appOptions.Value.PublicBaseUrl.TrimEnd('/');
+        var portalUrl = $"{baseUrl}/portal/meal-plans";
+        var subject = $"Speiseplan KW {plan.CalendarWeek}/{plan.Year} veröffentlicht";
+        var bodyHtml = $"<p>Der Speiseplan für KW {plan.CalendarWeek}/{plan.Year} wurde veröffentlicht und steht ab sofort im Kundenportal zur Einsicht bereit.</p>";
+        var html = EmailTemplate.Render($"Speiseplan KW {plan.CalendarWeek}/{plan.Year} ist jetzt verfügbar.", bodyHtml, "Speiseplan ansehen", portalUrl);
+        var text = $"Der Speiseplan für KW {plan.CalendarWeek}/{plan.Year} wurde veröffentlicht.\nJetzt ansehen: {portalUrl}";
+
+        foreach (var user in empfaenger)
+            await email.SendAsync(user.Email, user.Name, subject, html, text);
     }
 
     public async Task<MealPlanDto> UnpublishAsync(Guid id, CancellationToken ct = default)

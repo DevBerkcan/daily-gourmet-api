@@ -98,3 +98,10 @@ public class SaveDriverDto
     [Required] public string VehicleDescription { get; set; } = string.Empty;
     [Required] public string LicensePlate { get; set; } = string.Empty;
 }
+
+/// <summary>A driver's free-form question/problem from their dashboard — not tied to a specific route
+/// or stop (see RouteStop.ProblemNote/UpdateStopStatusDto for that case).</summary>
+public class ReportDriverIssueDto
+{
+    [Required] public string Message { get; set; } = string.Empty;
+}

@@ -9,6 +9,7 @@ public static class ProcurementLogisticsServiceCollectionExtensions
         services.AddScoped<ProcurementListHandler>();
         services.AddScoped<DeliveryRouteHandler>();
         services.AddScoped<DriverHandler>();
+        services.AddScoped<DriverIssueHandler>();
         return services;
     }
 }
