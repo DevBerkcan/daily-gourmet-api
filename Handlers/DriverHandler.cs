@@ -1,4 +1,3 @@
-using DailyGourmet.Api.Authentication;
 using DailyGourmet.Api.Data;
 using DailyGourmet.Api.Helpers;
 using DailyGourmet.Api.Models.DTOs;
@@ -9,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class DriverHandler(DailyGourmetDbContext db, ITenantContext tenantContext)
+public class DriverHandler(DailyGourmetDbContext db)
 {
     public async Task<PagedResult<DriverDto>> ListAsync(int page, int pageSize, CancellationToken ct = default)
     {
@@ -24,10 +23,14 @@ public class DriverHandler(DailyGourmetDbContext db, ITenantContext tenantContex
 
     public async Task<DriverDto> CreateAsync(SaveDriverDto dto, CancellationToken ct = default)
     {
+        // db.Users is tenant-filtered for TENANT_OWNER/TENANT_ADMIN already, so a foreign-tenant
+        // user simply won't be found for them; SUPER_ADMIN bypasses that filter and must instead
+        // take the driver's own tenant below, since tenantContext.TenantId is null for that role.
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == dto.UserId, ct) ?? throw new ValidationException("Benutzer existiert nicht.");
         if (user.Role != Role.DRIVER) throw new ValidationException("Der Benutzer muss die Rolle DRIVER haben.");
+        if (await db.Set<Driver>().AnyAsync(d => d.UserId == dto.UserId, ct)) throw new ConflictException("Für diesen Benutzer existiert bereits ein Fahrerprofil.");
 
-        var driver = new Driver { Id = Guid.NewGuid(), TenantId = tenantContext.TenantId!.Value, UserId = dto.UserId, Phone = dto.Phone, VehicleDescription = dto.VehicleDescription, LicensePlate = dto.LicensePlate };
+        var driver = new Driver { Id = Guid.NewGuid(), TenantId = user.TenantId!.Value, UserId = dto.UserId, Phone = dto.Phone, VehicleDescription = dto.VehicleDescription, LicensePlate = dto.LicensePlate };
         db.Set<Driver>().Add(driver);
         await db.SaveChangesAsync(ct);
         return await GetByIdAsync(driver.Id, ct);
