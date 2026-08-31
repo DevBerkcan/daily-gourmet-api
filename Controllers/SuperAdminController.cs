@@ -114,6 +114,13 @@ public class SuperAdminController(SuperAdminHandler handler, AuditLogHandler aud
         return Ok(ApiResponse.Ok());
     }
 
+    [HttpDelete("users/{id:guid}")]
+    public async Task<ActionResult<ApiResponse>> DeleteUser(Guid id, CancellationToken ct)
+    {
+        await handler.DeleteUserAsync(id, ct);
+        return Ok(ApiResponse.Ok());
+    }
+
     [HttpGet("feature-flags")]
     public async Task<ActionResult<ApiResponse<List<FeatureFlagDto>>>> ListFeatureFlags([FromQuery] Guid? tenantId, CancellationToken ct) =>
         Ok(ApiResponse<List<FeatureFlagDto>>.Ok(await handler.ListFeatureFlagsAsync(tenantId, ct)));

@@ -240,6 +240,30 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>Hard delete, per explicit product decision — unlike FacilityHandler.DeleteAsync,
+    /// which deliberately deactivates a facility's users instead of hard-deleting them (User is
+    /// Restrict-referenced from SupportTicket.CreatedByUserId, AuditLog.UserId, Recipe.CreatedByUserId
+    /// and others). Those same FKs still protect real history here: deleting a user who has ever
+    /// authored anything fails with a clear message rather than cascading through unrelated business
+    /// data. Only a user with no such footprint (e.g. a mistakenly created account) can actually be
+    /// removed this way; anyone else must be deactivated instead.</summary>
+    public async Task DeleteUserAsync(Guid id, CancellationToken ct = default)
+    {
+        var user = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == id, ct) ?? throw new NotFoundException(nameof(User), id);
+        if (user.Id == tenantContext.UserId) throw new ValidationException("Sie können Ihren eigenen Benutzer nicht löschen.");
+
+        db.Users.Remove(user);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            throw new ConflictException(
+                "Dieser Benutzer kann nicht endgültig gelöscht werden, da noch Datensätze auf ihn verweisen (z. B. Rezepte, Bestellungen, Support-Tickets, Protokolleinträge). Bitte stattdessen deaktivieren.");
+        }
+    }
+
     /// <summary>Admin-triggered password reset for an already-active user — reuses the exact same
     /// invitation-token machinery as UserManagementHandler.ResendInvitationAsync.
     /// AuthHandler.AcceptInvitationAsync already sets a new password for a user found by a valid
