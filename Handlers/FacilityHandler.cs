@@ -187,7 +187,9 @@ public class FacilityHandler(
     /// facility rather than leaving it soft-archived. FK config on Order/RouteStop/MealPlanFacility/
     /// User is deliberately Restrict (see Data/Configurations), so the deletes below are ordered by
     /// hand instead of relying on DB cascade — RouteStops (and their Items) must go before Orders
-    /// (and their Items) since RouteStopItem.OrderId/OrderItemId are themselves Restrict.</summary>
+    /// (and their Items) since RouteStopItem.OrderId/OrderItemId are themselves Restrict. Only the
+    /// junction row is removed, not the MealPlan itself — a plan can be shared with other facilities
+    /// that should keep it.</summary>
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)
     {
         var facility = await facilities.GetByIdAsync(id, ct) ?? throw new NotFoundException(nameof(Facility), id);

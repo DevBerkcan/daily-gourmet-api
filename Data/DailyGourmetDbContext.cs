@@ -120,7 +120,6 @@ public class DailyGourmetDbContext : DbContext
         modelBuilder.Entity<MealPlanDay>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.MealPlan.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<MealPlanItem>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.Recipe.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<MealPlanLocation>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.Location.TenantId == _tenantContext.TenantId);
-        modelBuilder.Entity<MealPlanFacility>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.Facility.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<OrderItem>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.Order.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<ProductionPlanItem>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.ProductionPlan.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<ProductionAdjustment>().HasQueryFilter(x => _tenantContext.IsSuperAdmin || x.ProductionPlanItem.ProductionPlan.TenantId == _tenantContext.TenantId);

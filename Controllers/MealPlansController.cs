@@ -49,17 +49,29 @@ public class MealPlansController(MealPlanHandler handler) : ControllerBase
         return Ok(ApiResponse.Ok());
     }
 
+    [HttpDelete("{id:guid}/facilities/{facilityId:guid}")]
+    public async Task<ActionResult<ApiResponse<MealPlanDto>>> RemoveFacility(Guid id, Guid facilityId, CancellationToken ct) =>
+        Ok(ApiResponse<MealPlanDto>.Ok(await handler.RemoveFacilityAsync(id, facilityId, ct)));
+
     [HttpPost("{id:guid}/duplicate")]
     public async Task<ActionResult<ApiResponse<MealPlanDto>>> Duplicate(Guid id, CancellationToken ct) =>
         Ok(ApiResponse<MealPlanDto>.Ok(await handler.DuplicateAsync(id, ct: ct)));
 
     [HttpPost("{id:guid}/duplicate-into-week")]
     public async Task<ActionResult<ApiResponse<MealPlanDto>>> DuplicateIntoWeek(Guid id, [FromBody] DuplicateIntoWeekDto dto, CancellationToken ct) =>
-        Ok(ApiResponse<MealPlanDto>.Ok(await handler.DuplicateAsync(id, dto.TargetYear, dto.TargetCalendarWeek, ct)));
+        Ok(ApiResponse<MealPlanDto>.Ok(await handler.DuplicateAsync(id, dto.FacilityIds, dto.TargetYear, dto.TargetCalendarWeek, ct)));
+
+    [HttpPost("{id:guid}/mark-as-template")]
+    public async Task<ActionResult<ApiResponse<MealPlanDto>>> MarkAsTemplate(Guid id, [FromBody] MarkAsTemplateDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<MealPlanDto>.Ok(await handler.MarkAsTemplateAsync(id, dto.TemplateSlot, ct)));
 
     [HttpPost("{id:guid}/submit-review")]
     public async Task<ActionResult<ApiResponse<MealPlanDto>>> SubmitReview(Guid id, CancellationToken ct) =>
         Ok(ApiResponse<MealPlanDto>.Ok(await handler.SubmitReviewAsync(id, ct)));
+
+    [HttpPost("{id:guid}/reject")]
+    public async Task<ActionResult<ApiResponse<MealPlanDto>>> Reject(Guid id, [FromBody] RejectMealPlanDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<MealPlanDto>.Ok(await handler.RejectAsync(id, dto.Reason, ct)));
 
     [HttpPost("{id:guid}/publish")]
     public async Task<ActionResult<ApiResponse<MealPlanDto>>> Publish(Guid id, CancellationToken ct) =>

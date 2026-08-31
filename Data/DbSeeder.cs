@@ -362,7 +362,8 @@ public static class DbSeeder
         }
         db.Recipes.AddRange(recipes);
 
-        // ---- Meal plans (current week 32 + prior week 31, both published) ----
+        // ---- Meal plans (current week 32 + prior week 31, both published) — shared across every
+        // active facility, since a MealPlan can serve several facilities with identical dishes.
         var weekdays = new[] { "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag" };
         MealPlan BuildMealPlan(Guid id, int week, int year, DateOnly monday, MealPlanStatus status, Guid[] recipeIds)
         {
@@ -370,7 +371,7 @@ public static class DbSeeder
             db.MealPlans.Add(plan);
             db.MealPlanLocations.Add(new MealPlanLocation { MealPlanId = id, LocationId = locationId });
             foreach (var f in facilityData.Where(f => f.Status == FacilityStatus.AKTIV))
-                db.MealPlanFacilities.Add(new MealPlanFacility { MealPlanId = id, FacilityId = f.Id });
+                db.MealPlanFacilities.Add(new MealPlanFacility { MealPlanId = id, FacilityId = f.Id, TenantId = tenantId, Year = year, CalendarWeek = week });
 
             for (int i = 0; i < 5; i++)
             {

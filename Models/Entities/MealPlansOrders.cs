@@ -11,6 +11,10 @@ public class MealPlan : BaseEntity, ITenantScoped
     public int Year { get; set; }
     public MealPlanStatus Status { get; set; } = MealPlanStatus.DRAFT;
 
+    /// <summary>Set by MealPlanHandler.RejectAsync (REVIEW → DRAFT) so the creator sees why; cleared
+    /// again by SubmitReviewAsync once they resubmit, so it never lingers past the fix.</summary>
+    public string? RejectionReason { get; set; }
+
     /// <summary>Marks this as one of up to 8 reusable base weeks ("Vorlage 1-8") rather than a
     /// live week — duplicate-into-week works the same for templates and ordinary past weeks, this
     /// flag just changes how it's listed/picked in the UI.</summary>
@@ -18,10 +22,32 @@ public class MealPlan : BaseEntity, ITenantScoped
     /// <summary>1-8 when IsTemplate is true, unique per tenant; null otherwise.</summary>
     public int? TemplateSlot { get; set; }
 
-    public ICollection<MealPlanLocation> Locations { get; set; } = new List<MealPlanLocation>();
+    /// <summary>The facilities this plan is shared with — empty only when IsTemplate is true, since a
+    /// template is facility-neutral until someone uses it. A plan can serve several facilities at
+    /// once with identical dishes (see MealPlanFacility); a facility that needs its own divergent
+    /// version instead goes through MealPlanHandler.MarkAsTemplateAsync/DuplicateAsync, which always
+    /// produces an independent copy rather than mutating the shared plan.</summary>
     public ICollection<MealPlanFacility> Facilities { get; set; } = new List<MealPlanFacility>();
+
+    public ICollection<MealPlanLocation> Locations { get; set; } = new List<MealPlanLocation>();
     public ICollection<MealPlanDay> Days { get; set; } = new List<MealPlanDay>();
     public ICollection<Order> Orders { get; set; } = new List<Order>();
+}
+
+/// <summary>Denormalizes TenantId/Year/CalendarWeek from the parent MealPlan (set once at creation,
+/// never changed afterward) so the DB can enforce "one plan per facility per calendar week" with a
+/// unique index directly on this junction table — a plain composite PK on (MealPlanId, FacilityId)
+/// can't express that, since the same facility could otherwise appear on two different plans for the
+/// same week.</summary>
+public class MealPlanFacility : ITenantScoped
+{
+    public Guid MealPlanId { get; set; }
+    public MealPlan MealPlan { get; set; } = null!;
+    public Guid FacilityId { get; set; }
+    public Facility Facility { get; set; } = null!;
+    public Guid TenantId { get; set; }
+    public int Year { get; set; }
+    public int CalendarWeek { get; set; }
 }
 
 public class MealPlanLocation
@@ -30,14 +56,6 @@ public class MealPlanLocation
     public MealPlan MealPlan { get; set; } = null!;
     public Guid LocationId { get; set; }
     public Location Location { get; set; } = null!;
-}
-
-public class MealPlanFacility
-{
-    public Guid MealPlanId { get; set; }
-    public MealPlan MealPlan { get; set; } = null!;
-    public Guid FacilityId { get; set; }
-    public Facility Facility { get; set; } = null!;
 }
 
 /// <summary>SpeiseplanTag.</summary>

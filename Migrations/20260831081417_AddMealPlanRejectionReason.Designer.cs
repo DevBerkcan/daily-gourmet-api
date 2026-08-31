@@ -4,6 +4,7 @@ using DailyGourmet.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace DailyGourmet.Api.Migrations
 {
     [DbContext(typeof(DailyGourmetDbContext))]
-    partial class DailyGourmetDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260831081417_AddMealPlanRejectionReason")]
+    partial class AddMealPlanRejectionReason
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -708,6 +711,9 @@ namespace DailyGourmet.Api.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<Guid?>("FacilityId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("IsTemplate")
                         .HasColumnType("bit");
 
@@ -734,11 +740,21 @@ namespace DailyGourmet.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("FacilityId");
+
                     b.HasIndex("TenantId", "TemplateSlot")
                         .IsUnique()
                         .HasFilter("[IsTemplate] = 1");
 
-                    b.ToTable("MealPlans");
+                    b.HasIndex("TenantId", "FacilityId", "Year", "CalendarWeek")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MealPlans_TenantId_FacilityId_Year_CalendarWeek")
+                        .HasFilter("[FacilityId] IS NOT NULL");
+
+                    b.ToTable("MealPlans", t =>
+                        {
+                            t.HasCheckConstraint("CK_MealPlans_FacilityRequiredUnlessTemplate", "[IsTemplate] = 1 OR [FacilityId] IS NOT NULL");
+                        });
                 });
 
             modelBuilder.Entity("DailyGourmet.Api.Models.Entities.MealPlanDay", b =>
@@ -773,34 +789,6 @@ namespace DailyGourmet.Api.Migrations
                     b.HasIndex("MealPlanId");
 
                     b.ToTable("MealPlanDays");
-                });
-
-            modelBuilder.Entity("DailyGourmet.Api.Models.Entities.MealPlanFacility", b =>
-                {
-                    b.Property<Guid>("MealPlanId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("FacilityId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("CalendarWeek")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("Year")
-                        .HasColumnType("int");
-
-                    b.HasKey("MealPlanId", "FacilityId");
-
-                    b.HasIndex("FacilityId");
-
-                    b.HasIndex("TenantId", "FacilityId", "Year", "CalendarWeek")
-                        .IsUnique()
-                        .HasDatabaseName("IX_MealPlanFacilities_TenantId_FacilityId_Year_CalendarWeek");
-
-                    b.ToTable("MealPlanFacilities");
                 });
 
             modelBuilder.Entity("DailyGourmet.Api.Models.Entities.MealPlanItem", b =>
@@ -2536,11 +2524,18 @@ namespace DailyGourmet.Api.Migrations
 
             modelBuilder.Entity("DailyGourmet.Api.Models.Entities.MealPlan", b =>
                 {
+                    b.HasOne("DailyGourmet.Api.Models.Entities.Facility", "Facility")
+                        .WithMany()
+                        .HasForeignKey("FacilityId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("DailyGourmet.Api.Models.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("Facility");
 
                     b.Navigation("Tenant");
                 });
@@ -2552,25 +2547,6 @@ namespace DailyGourmet.Api.Migrations
                         .HasForeignKey("MealPlanId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("MealPlan");
-                });
-
-            modelBuilder.Entity("DailyGourmet.Api.Models.Entities.MealPlanFacility", b =>
-                {
-                    b.HasOne("DailyGourmet.Api.Models.Entities.Facility", "Facility")
-                        .WithMany()
-                        .HasForeignKey("FacilityId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("DailyGourmet.Api.Models.Entities.MealPlan", "MealPlan")
-                        .WithMany("Facilities")
-                        .HasForeignKey("MealPlanId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Facility");
 
                     b.Navigation("MealPlan");
                 });
@@ -3231,8 +3207,6 @@ namespace DailyGourmet.Api.Migrations
             modelBuilder.Entity("DailyGourmet.Api.Models.Entities.MealPlan", b =>
                 {
                     b.Navigation("Days");
-
-                    b.Navigation("Facilities");
 
                     b.Navigation("Locations");
 

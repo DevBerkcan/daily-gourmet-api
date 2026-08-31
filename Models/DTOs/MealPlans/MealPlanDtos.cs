@@ -29,6 +29,7 @@ public class MealPlanDto
     public int? TemplateSlot { get; set; }
     public Guid[] LocationIds { get; set; } = [];
     public Guid[] FacilityIds { get; set; } = [];
+    public string? RejectionReason { get; set; }
     public List<MealPlanDayDto> Days { get; set; } = [];
 }
 
@@ -37,7 +38,9 @@ public class CreateMealPlanDto
     [Range(1, 53)] public int CalendarWeek { get; set; }
     [Range(2000, 2100)] public int Year { get; set; }
     [Required] public Guid[] LocationIds { get; set; } = [];
-    [Required] public Guid[] FacilityIds { get; set; } = [];
+    /// <summary>At least one required unless IsTemplate is true — validated in the handler since a
+    /// template's facility-neutrality makes this conditional, which data annotations can't express.</summary>
+    public Guid[] FacilityIds { get; set; } = [];
     public bool IsTemplate { get; set; }
     [Range(1, 8)] public int? TemplateSlot { get; set; }
 }
@@ -66,4 +69,17 @@ public class DuplicateIntoWeekDto
 {
     [Range(2000, 2100)] public int TargetYear { get; set; }
     [Range(1, 53)] public int TargetCalendarWeek { get; set; }
+    /// <summary>Required when the source is a template (facility-neutral); defaults to the source
+    /// plan's own facilities otherwise. Validated in the handler.</summary>
+    public Guid[]? FacilityIds { get; set; }
+}
+
+public class MarkAsTemplateDto
+{
+    [Range(1, 8)] public int TemplateSlot { get; set; }
+}
+
+public class RejectMealPlanDto
+{
+    [Required, MaxLength(1000)] public string Reason { get; set; } = string.Empty;
 }

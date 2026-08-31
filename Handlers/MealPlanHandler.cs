@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IFeatureFlagService featureFlags)
+public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IFeatureFlagService featureFlags, IEmailService email)
 {
     private static readonly string[] Weekdays = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"];
 
@@ -40,19 +40,24 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
 
     public async Task<MealPlanDto> CreateAsync(CreateMealPlanDto dto, CancellationToken ct = default)
     {
+        if (!dto.IsTemplate && dto.FacilityIds.Length == 0)
+            throw new ValidationException("Für einen Wochenplan ist mindestens eine Einrichtung erforderlich.");
+
+        var tenantId = tenantContext.TenantId!.Value;
         var plan = new MealPlan
         {
-            Id = Guid.NewGuid(), TenantId = tenantContext.TenantId!.Value, CalendarWeek = dto.CalendarWeek, Year = dto.Year, Status = MealPlanStatus.DRAFT,
+            Id = Guid.NewGuid(), TenantId = tenantId, CalendarWeek = dto.CalendarWeek, Year = dto.Year, Status = MealPlanStatus.DRAFT,
             IsTemplate = dto.IsTemplate, TemplateSlot = dto.IsTemplate ? dto.TemplateSlot : null,
         };
         db.MealPlans.Add(plan);
-        AddLocationsAndFacilities(plan.Id, dto.LocationIds, dto.FacilityIds);
+        AddLocations(plan.Id, dto.LocationIds);
+        if (!dto.IsTemplate) AddFacilities(plan.Id, dto.FacilityIds, tenantId, dto.Year, dto.CalendarWeek);
         AddDays(plan.Id, dto.Year, dto.CalendarWeek);
 
         try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("IX_MealPlans_TenantId_Year_CalendarWeek") == true)
+        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("IX_MealPlanFacilities_TenantId_FacilityId_Year_CalendarWeek") == true)
         {
-            throw new ConflictException("Für diese Kalenderwoche existiert bereits ein Speiseplan.");
+            throw new ConflictException("Für mindestens eine der ausgewählten Einrichtungen existiert in dieser Kalenderwoche bereits ein Speiseplan.");
         }
         catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("IX_MealPlans_TenantId_TemplateSlot") == true)
         {
@@ -68,10 +73,16 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
             .FirstOrDefaultAsync(m => m.Id == id, ct) ?? throw new NotFoundException(nameof(MealPlan), id);
         if (plan.Status is not (MealPlanStatus.DRAFT or MealPlanStatus.REVIEW))
             throw new ConflictException("Speiseplan kann in diesem Status nicht mehr bearbeitet werden.");
+        if (!plan.IsTemplate && dto.FacilityIds.Length == 0)
+            throw new ValidationException("Für einen Wochenplan ist mindestens eine Einrichtung erforderlich.");
 
         db.MealPlanLocations.RemoveRange(plan.Locations);
-        db.MealPlanFacilities.RemoveRange(plan.Facilities);
-        AddLocationsAndFacilities(plan.Id, dto.LocationIds, dto.FacilityIds);
+        AddLocations(plan.Id, dto.LocationIds);
+        if (!plan.IsTemplate)
+        {
+            db.MealPlanFacilities.RemoveRange(plan.Facilities);
+            AddFacilities(plan.Id, dto.FacilityIds, plan.TenantId, plan.Year, plan.CalendarWeek);
+        }
 
         foreach (var dayDto in dto.Days)
         {
@@ -86,7 +97,11 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
         }
 
         plan.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("IX_MealPlanFacilities_TenantId_FacilityId_Year_CalendarWeek") == true)
+        {
+            throw new ConflictException("Für mindestens eine der ausgewählten Einrichtungen existiert in dieser Kalenderwoche bereits ein Speiseplan.");
+        }
         return await GetByIdAsync(id, ct);
     }
 
@@ -94,9 +109,12 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
     /// calendar week. Serves both "create this week from Vorlage 3" and "duplicate KW36 into KW37"
     /// with one operation; when no explicit target is given, defaults to the next ISO week after
     /// the source (the original behavior of the plain "Duplizieren" action).</summary>
-    public async Task<MealPlanDto> DuplicateAsync(Guid id, int? targetYear = null, int? targetCalendarWeek = null, CancellationToken ct = default)
+    public async Task<MealPlanDto> DuplicateAsync(Guid id, Guid[]? targetFacilityIds = null, int? targetYear = null, int? targetCalendarWeek = null, CancellationToken ct = default)
     {
         var source = await FullQuery(db).FirstOrDefaultAsync(m => m.Id == id, ct) ?? throw new NotFoundException(nameof(MealPlan), id);
+        var resolvedFacilityIds = targetFacilityIds is { Length: > 0 } ? targetFacilityIds : source.Facilities.Select(f => f.FacilityId).ToArray();
+        if (resolvedFacilityIds.Length == 0)
+            throw new ValidationException("Für den neuen Wochenplan ist mindestens eine Einrichtung erforderlich.");
 
         int targetWeek, targetYearResolved;
         if (targetYear is { } ty && targetCalendarWeek is { } tw)
@@ -114,7 +132,7 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
         var copy = new MealPlan { Id = Guid.NewGuid(), TenantId = source.TenantId, CalendarWeek = targetWeek, Year = targetYearResolved, Status = MealPlanStatus.DRAFT };
         db.MealPlans.Add(copy);
         foreach (var loc in source.Locations) db.MealPlanLocations.Add(new MealPlanLocation { MealPlanId = copy.Id, LocationId = loc.LocationId });
-        foreach (var fac in source.Facilities) db.MealPlanFacilities.Add(new MealPlanFacility { MealPlanId = copy.Id, FacilityId = fac.FacilityId });
+        AddFacilities(copy.Id, resolvedFacilityIds, source.TenantId, targetYearResolved, targetWeek);
 
         var monday = ISOWeek.ToDateTime(targetYearResolved, targetWeek, DayOfWeek.Monday);
         var sourceDays = source.Days.OrderBy(d => d.Date).ToList();
@@ -131,23 +149,111 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
         }
 
         try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("IX_MealPlans_TenantId_Year_CalendarWeek") == true)
+        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("IX_MealPlanFacilities_TenantId_FacilityId_Year_CalendarWeek") == true)
         {
-            throw new ConflictException("Für diese Kalenderwoche existiert bereits ein Speiseplan.");
+            throw new ConflictException("Für mindestens eine der ausgewählten Einrichtungen existiert in dieser Kalenderwoche bereits ein Speiseplan.");
         }
         return await GetByIdAsync(copy.Id, ct);
     }
 
+    /// <summary>Turns an existing plan into a new, independent template (slot 1-8) — a deep copy, not
+    /// a conversion, so the source plan (its facilities, status, live orders) is completely untouched.
+    /// The template is facility-neutral (no MealPlanFacility rows at all — see MealPlan.Facilities doc
+    /// comment) and keeps the source's day/dish structure verbatim, including the original dates —
+    /// those are cosmetic for a template (it's never scheduled itself), so no ISO-week recompute is
+    /// needed here unlike DuplicateAsync.</summary>
+    public async Task<MealPlanDto> MarkAsTemplateAsync(Guid id, int templateSlot, CancellationToken ct = default)
+    {
+        var source = await FullQuery(db).FirstOrDefaultAsync(m => m.Id == id, ct) ?? throw new NotFoundException(nameof(MealPlan), id);
+
+        var template = new MealPlan
+        {
+            Id = Guid.NewGuid(), TenantId = source.TenantId, CalendarWeek = source.CalendarWeek, Year = source.Year,
+            Status = MealPlanStatus.DRAFT, IsTemplate = true, TemplateSlot = templateSlot,
+        };
+        db.MealPlans.Add(template);
+        foreach (var loc in source.Locations) db.MealPlanLocations.Add(new MealPlanLocation { MealPlanId = template.Id, LocationId = loc.LocationId });
+
+        foreach (var sourceDay in source.Days)
+        {
+            var newDay = new MealPlanDay { Id = Guid.NewGuid(), MealPlanId = template.Id, Weekday = sourceDay.Weekday, Date = sourceDay.Date, Note = sourceDay.Note, CreatedAt = DateTime.UtcNow };
+            db.MealPlanDays.Add(newDay);
+            foreach (var item in sourceDay.Items)
+                db.MealPlanItems.Add(new MealPlanItem { Id = Guid.NewGuid(), MealPlanDayId = newDay.Id, RecipeId = item.RecipeId, DietLine = item.DietLine, CreatedAt = DateTime.UtcNow });
+        }
+
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("IX_MealPlans_TenantId_TemplateSlot") == true)
+        {
+            throw new ConflictException("Dieser Vorlagenplatz (1-8) ist bereits belegt.");
+        }
+        return await GetByIdAsync(template.Id, ct);
+    }
+
+    /// <summary>Drafts and plans still in review can both be removed — review included, since an
+    /// admin who spots a mistake mid-review shouldn't have to reject-then-delete. Deleting a
+    /// submitted plan notifies the tenant's other admins (excluding whoever just deleted it), since
+    /// it disappears from their queue without them having acted on it.</summary>
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)
     {
         var plan = await db.MealPlans.FirstOrDefaultAsync(m => m.Id == id, ct) ?? throw new NotFoundException(nameof(MealPlan), id);
-        if (plan.Status != MealPlanStatus.DRAFT)
-            throw new ConflictException("Nur Entwürfe können gelöscht werden — versehentlich duplizierte Wochen lassen sich so entfernen.");
+        if (plan.Status is not (MealPlanStatus.DRAFT or MealPlanStatus.REVIEW))
+            throw new ConflictException("Nur Entwürfe oder Pläne in Prüfung können gelöscht werden.");
+
+        var wasInReview = plan.Status == MealPlanStatus.REVIEW;
+        var tenantId = plan.TenantId;
+        var week = plan.CalendarWeek;
+        var year = plan.Year;
         db.MealPlans.Remove(plan);
         await db.SaveChangesAsync(ct);
+
+        if (wasInReview)
+        {
+            await NotifyOtherAdminsAsync(tenantId,
+                $"Wochenplan KW {week}/{year} gelöscht",
+                $"Wochenplan KW {week}/{year} wurde gelöscht.",
+                $"<p>Der Wochenplan für KW {week}/{year}, der sich in Prüfung befand, wurde gelöscht.</p>",
+                $"Der Wochenplan für KW {week}/{year}, der sich in Prüfung befand, wurde gelöscht.",
+                ct);
+        }
     }
 
-    public async Task<MealPlanDto> SubmitReviewAsync(Guid id, CancellationToken ct = default) => await TransitionAsync(id, MealPlanStatus.DRAFT, MealPlanStatus.REVIEW, ct);
+    public async Task<MealPlanDto> SubmitReviewAsync(Guid id, CancellationToken ct = default)
+    {
+        var plan = await db.MealPlans.FirstOrDefaultAsync(m => m.Id == id, ct) ?? throw new NotFoundException(nameof(MealPlan), id);
+        if (plan.Status != MealPlanStatus.DRAFT) throw new ConflictException($"Übergang von {plan.Status} nach REVIEW ist nicht erlaubt.");
+        plan.Status = MealPlanStatus.REVIEW;
+        plan.RejectionReason = null;
+        plan.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return await GetByIdAsync(id, ct);
+    }
+
+    /// <summary>REVIEW → DRAFT with a required reason, rather than a separate terminal status — a
+    /// rejection is feedback for revision, not a dead end, and reusing DRAFT keeps it editable
+    /// through the existing UpdateAsync path without new status-transition logic. The reason is
+    /// cleared again by SubmitReviewAsync so it never lingers past the next resubmission.</summary>
+    public async Task<MealPlanDto> RejectAsync(Guid id, string reason, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) throw new ValidationException("Für eine Ablehnung ist ein Grund erforderlich.");
+        var plan = await db.MealPlans.FirstOrDefaultAsync(m => m.Id == id, ct) ?? throw new NotFoundException(nameof(MealPlan), id);
+        if (plan.Status != MealPlanStatus.REVIEW) throw new ConflictException("Nur Pläne in Prüfung können abgelehnt werden.");
+
+        plan.Status = MealPlanStatus.DRAFT;
+        plan.RejectionReason = reason.Trim();
+        plan.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        var reasonEncoded = System.Net.WebUtility.HtmlEncode(plan.RejectionReason);
+        await NotifyOtherAdminsAsync(plan.TenantId,
+            $"Wochenplan KW {plan.CalendarWeek}/{plan.Year} abgelehnt",
+            $"Wochenplan KW {plan.CalendarWeek}/{plan.Year} wurde abgelehnt.",
+            $"<p>Der Wochenplan für KW {plan.CalendarWeek}/{plan.Year} wurde zur Überarbeitung zurückgeschickt.</p><p><strong>Grund:</strong> {reasonEncoded}</p>",
+            $"Der Wochenplan für KW {plan.CalendarWeek}/{plan.Year} wurde zur Überarbeitung zurückgeschickt.\nGrund: {plan.RejectionReason}",
+            ct);
+
+        return await GetByIdAsync(id, ct);
+    }
 
     public async Task<MealPlanDto> PublishAsync(Guid id, CancellationToken ct = default)
     {
@@ -207,20 +313,51 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
         return plans.Select(ToDto).ToList();
     }
 
-    private async Task<MealPlanDto> TransitionAsync(Guid id, MealPlanStatus from, MealPlanStatus to, CancellationToken ct)
+    /// <summary>Detaches one facility from a shared plan without touching the rest — the facility
+    /// keeps whatever it had before (nothing), and an admin can separately give it its own version
+    /// via MarkAsTemplateAsync/DuplicateAsync if needed. Always leaves at least one facility behind;
+    /// a plan with zero facilities is a state nothing else in the app expects (mirrors the
+    /// "at least one facility" requirement on Create/Update).</summary>
+    public async Task<MealPlanDto> RemoveFacilityAsync(Guid id, Guid facilityId, CancellationToken ct = default)
     {
-        var plan = await db.MealPlans.FirstOrDefaultAsync(m => m.Id == id, ct) ?? throw new NotFoundException(nameof(MealPlan), id);
-        if (plan.Status != from) throw new ConflictException($"Übergang von {plan.Status} nach {to} ist nicht erlaubt.");
-        plan.Status = to;
+        var plan = await db.MealPlans.Include(m => m.Facilities).FirstOrDefaultAsync(m => m.Id == id, ct) ?? throw new NotFoundException(nameof(MealPlan), id);
+        var link = plan.Facilities.FirstOrDefault(f => f.FacilityId == facilityId) ?? throw new NotFoundException(nameof(MealPlanFacility), facilityId);
+        if (plan.Facilities.Count <= 1)
+            throw new ConflictException("Die letzte Einrichtung kann nicht entfernt werden — dafür den ganzen Plan löschen.");
+
+        db.MealPlanFacilities.Remove(link);
         plan.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         return await GetByIdAsync(id, ct);
     }
 
-    private void AddLocationsAndFacilities(Guid planId, Guid[] locationIds, Guid[] facilityIds)
+    /// <summary>Mirrors OrderHandler.NotifyTenantAdminsOfNewOrderAsync's recipient pattern (fresh
+    /// role query, no hardcoded addresses) — excludes the acting admin themselves so they don't get
+    /// emailed about their own reject/delete.</summary>
+    private async Task NotifyOtherAdminsAsync(Guid tenantId, string subject, string preheader, string bodyHtml, string plainText, CancellationToken ct)
+    {
+        var empfaenger = await db.Users
+            .Where(u => u.TenantId == tenantId && (u.Role == Role.TENANT_OWNER || u.Role == Role.TENANT_ADMIN) && u.Status == UserStatus.AKTIV && u.Id != tenantContext.UserId)
+            .ToListAsync(ct);
+        if (empfaenger.Count == 0) return;
+
+        var html = EmailTemplate.Render(preheader, bodyHtml);
+        foreach (var user in empfaenger)
+            await email.SendAsync(user.Email, user.Name, subject, html, plainText);
+    }
+
+    private void AddLocations(Guid planId, Guid[] locationIds)
     {
         foreach (var locationId in locationIds.Distinct()) db.MealPlanLocations.Add(new MealPlanLocation { MealPlanId = planId, LocationId = locationId });
-        foreach (var facilityId in facilityIds.Distinct()) db.MealPlanFacilities.Add(new MealPlanFacility { MealPlanId = planId, FacilityId = facilityId });
+    }
+
+    /// <summary>Year/CalendarWeek are denormalized onto each row here (copied from the plan they'll
+    /// belong to) so the DB-level unique index on MealPlanFacilities can enforce "one plan per
+    /// facility per week" without a join — see MealPlanFacility's doc comment.</summary>
+    private void AddFacilities(Guid planId, Guid[] facilityIds, Guid tenantId, int year, int calendarWeek)
+    {
+        foreach (var facilityId in facilityIds.Distinct())
+            db.MealPlanFacilities.Add(new MealPlanFacility { MealPlanId = planId, FacilityId = facilityId, TenantId = tenantId, Year = year, CalendarWeek = calendarWeek });
     }
 
     private void AddDays(Guid planId, int year, int calendarWeek)
@@ -240,6 +377,7 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
         TemplateSlot = m.TemplateSlot,
         LocationIds = m.Locations.Select(l => l.LocationId).ToArray(),
         FacilityIds = m.Facilities.Select(f => f.FacilityId).ToArray(),
+        RejectionReason = m.RejectionReason,
         Days = m.Days.OrderBy(d => d.Date).Select(d => new MealPlanDayDto
         {
             Id = d.Id, Weekday = d.Weekday, Date = d.Date, Note = d.Note,

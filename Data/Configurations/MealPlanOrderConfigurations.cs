@@ -9,11 +9,26 @@ public class MealPlanConfiguration : IEntityTypeConfiguration<MealPlan>
     public void Configure(EntityTypeBuilder<MealPlan> b)
     {
         b.Property(m => m.Status).HasConversion<string>().HasMaxLength(20);
-        b.HasIndex(m => new { m.TenantId, m.Year, m.CalendarWeek }).IsUnique();
+        b.Property(m => m.RejectionReason).HasMaxLength(1000);
         b.HasIndex(m => new { m.TenantId, m.TemplateSlot }).IsUnique().HasFilter("[IsTemplate] = 1");
 
         b.HasOne(m => m.Tenant).WithMany()
             .HasForeignKey(m => m.TenantId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class MealPlanFacilityConfiguration : IEntityTypeConfiguration<MealPlanFacility>
+{
+    public void Configure(EntityTypeBuilder<MealPlanFacility> b)
+    {
+        b.HasKey(x => new { x.MealPlanId, x.FacilityId });
+        b.HasIndex(x => new { x.TenantId, x.FacilityId, x.Year, x.CalendarWeek }).IsUnique()
+            .HasDatabaseName("IX_MealPlanFacilities_TenantId_FacilityId_Year_CalendarWeek");
+
+        b.HasOne(x => x.MealPlan).WithMany(m => m.Facilities)
+            .HasForeignKey(x => x.MealPlanId).OnDelete(DeleteBehavior.Cascade);
+        b.HasOne(x => x.Facility).WithMany()
+            .HasForeignKey(x => x.FacilityId).OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -26,18 +41,6 @@ public class MealPlanLocationConfiguration : IEntityTypeConfiguration<MealPlanLo
             .HasForeignKey(x => x.MealPlanId).OnDelete(DeleteBehavior.Cascade);
         b.HasOne(x => x.Location).WithMany()
             .HasForeignKey(x => x.LocationId).OnDelete(DeleteBehavior.Restrict);
-    }
-}
-
-public class MealPlanFacilityConfiguration : IEntityTypeConfiguration<MealPlanFacility>
-{
-    public void Configure(EntityTypeBuilder<MealPlanFacility> b)
-    {
-        b.HasKey(x => new { x.MealPlanId, x.FacilityId });
-        b.HasOne(x => x.MealPlan).WithMany(m => m.Facilities)
-            .HasForeignKey(x => x.MealPlanId).OnDelete(DeleteBehavior.Cascade);
-        b.HasOne(x => x.Facility).WithMany()
-            .HasForeignKey(x => x.FacilityId).OnDelete(DeleteBehavior.Restrict);
     }
 }
 
