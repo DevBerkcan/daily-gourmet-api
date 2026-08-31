@@ -7,6 +7,7 @@ public static class ProcurementLogisticsServiceCollectionExtensions
     public static IServiceCollection AddProcurementLogisticsModule(this IServiceCollection services)
     {
         services.AddScoped<ProcurementListHandler>();
+        services.AddScoped<ProcurementOverviewHandler>();
         services.AddScoped<DeliveryRouteHandler>();
         services.AddScoped<DriverHandler>();
         services.AddScoped<DriverIssueHandler>();

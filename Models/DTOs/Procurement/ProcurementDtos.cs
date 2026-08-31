@@ -45,3 +45,24 @@ public class UpdateStatusDto
 {
     [Required] public string Status { get; set; } = string.Empty;
 }
+
+/// <summary>One row of ProcurementOverviewHandler.ListWeeksAsync — a calendar week that has at least
+/// one confirmed order, with just enough at-a-glance numbers to pick which week to drill into.</summary>
+public class ProcurementWeekDto
+{
+    public int Year { get; set; }
+    public int CalendarWeek { get; set; }
+    public int ConfirmedOrderCount { get; set; }
+    public int TotalPortions { get; set; }
+}
+
+/// <summary>One recipe's demand across every confirmed order in a given week — "wie viele
+/// Einrichtungen/Portionen brauchen wir von diesem Gericht", the level between the week overview and
+/// the full ingredient breakdown.</summary>
+public class WeekRecipeRequirementDto
+{
+    public Guid RecipeId { get; set; }
+    public string RecipeName { get; set; } = string.Empty;
+    public int TotalPortions { get; set; }
+    public int FacilityCount { get; set; }
+}

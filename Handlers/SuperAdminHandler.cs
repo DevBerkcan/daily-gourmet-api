@@ -207,6 +207,13 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
             ?? throw new NotFoundException(nameof(User), id);
         if (!Enum.TryParse<Role>(dto.Role, out var role)) throw new ValidationException("Ungültige Rolle.");
 
+        // TenantId is never touched below (see SuperAdminUpdateUserDto's doc comment) — so a role
+        // change that would cross the platform/tenant boundary must be rejected here, otherwise it
+        // silently produces an invalid User (SUPER_ADMIN with a stray TenantId, or a tenant role with
+        // TenantId still null, which crashes the first tenantContext.TenantId!.Value it hits).
+        if ((role == Role.SUPER_ADMIN) != (user.TenantId is null))
+            throw new ValidationException("Ein Wechsel zwischen Plattform- und Mandanten-Rolle ist über die Bearbeitung nicht möglich — dafür einen neuen Benutzer anlegen.");
+
         if (dto.FacilityId is { } fid)
         {
             var facilityBelongsToTenant = await db.Facilities.IgnoreQueryFilters().AnyAsync(f => f.Id == fid && f.TenantId == user.TenantId, ct);
