@@ -184,11 +184,11 @@ public class ProcurementListHandler(DailyGourmetDbContext db, ITenantContext ten
         var itemCount = await db.ProcurementListItems.CountAsync(i => i.ProcurementListId == list.Id, ct);
         var baseUrl = appOptions.Value.PublicBaseUrl.TrimEnd('/');
         var approveUrl = $"{baseUrl}/procurement/approve?id={list.Id}&token={list.ApprovalToken}";
-        var html = $"""
+        var body = $"""
             <p>Für Kalenderwoche {list.CalendarWeek} ist eine Bestellung offen: <strong>{list.Label}</strong> ({itemCount} Positionen).</p>
-            <p><a href="{approveUrl}">Bestellung freigeben</a></p>
             <p>Der Link ist 48 Stunden gültig.</p>
             """;
+        var html = EmailTemplate.Render($"Bestellung freigeben – KW {list.CalendarWeek}.", body, "Bestellung freigeben", approveUrl);
         var text = $"Für Kalenderwoche {list.CalendarWeek} ist eine Bestellung offen: {list.Label} ({itemCount} Positionen).\nFreigeben: {approveUrl}\nGültig für 48 Stunden.";
         await emailService.SendAsync(list.Tenant.MainContactEmail, list.Tenant.MainContactName, $"Bestellung freigeben – KW {list.CalendarWeek}", html, text);
     }

@@ -117,11 +117,11 @@ public class FacilityHandler(
     {
         var baseUrl = appOptions.Value.PublicBaseUrl.TrimEnd('/');
         var acceptUrl = $"{baseUrl}/accept-invite/{user.InvitationToken}";
-        var html = $"""
-            <p>Für Ihre Einrichtung wurde ein Zugang zu Daily Gourmet angelegt. Klicken Sie auf den folgenden Link, um Ihr Passwort festzulegen und sich anzumelden:</p>
-            <p><a href="{acceptUrl}">Konto aktivieren</a></p>
+        var body = $"""
+            <p>Für Ihre Einrichtung wurde ein Zugang zu Daily Gourmet angelegt. Klicken Sie auf den Button unten, um Ihr Passwort festzulegen und sich anzumelden.</p>
             <p>Der Link ist 72 Stunden gültig.</p>
             """;
+        var html = EmailTemplate.Render("Ihr Zugang zu Daily Gourmet ist bereit.", body, "Konto aktivieren", acceptUrl);
         var text = $"Für Ihre Einrichtung wurde ein Zugang zu Daily Gourmet angelegt. Passwort festlegen: {acceptUrl}\nDer Link ist 72 Stunden gültig.";
         await email.SendAsync(user.Email, user.Name, "Zugang zu Daily Gourmet", html, text);
     }

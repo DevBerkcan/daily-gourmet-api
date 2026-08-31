@@ -115,10 +115,11 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
 
         if (!string.IsNullOrWhiteSpace(order.Facility.Email))
         {
-            var html = $"""
+            var body = $"""
                 <p>Ihre Bestellung für KW {order.MealPlan.CalendarWeek}/{order.MealPlan.Year} wurde von Daily Gourmet bestätigt.</p>
                 <p>Änderungen sind ab jetzt nur noch bis zur tagesaktuellen Frist möglich.</p>
                 """;
+            var html = EmailTemplate.Render($"Ihre Bestellung für KW {order.MealPlan.CalendarWeek}/{order.MealPlan.Year} wurde bestätigt.", body);
             var text = $"Ihre Bestellung für KW {order.MealPlan.CalendarWeek}/{order.MealPlan.Year} wurde von Daily Gourmet bestätigt. Änderungen sind ab jetzt nur noch bis zur tagesaktuellen Frist möglich.";
             await email.SendAsync(order.Facility.Email, order.Facility.ContactPerson, "Ihre Bestellung wurde bestätigt", html, text);
         }
@@ -139,10 +140,11 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
 
         var facility = await db.Facilities.FirstOrDefaultAsync(f => f.Id == facilityId, ct);
         var facilityName = facility?.Name ?? "Eine Einrichtung";
-        var html = $"""
+        var body = $"""
             <p><strong>{facilityName}</strong> hat eine Bestellung abgesendet.</p>
             <p>{portionen} Portionen insgesamt · Frist: {deadlineAtUtc:dd.MM.yyyy HH:mm} Uhr</p>
             """;
+        var html = EmailTemplate.Render($"{facilityName} hat eine Bestellung abgesendet.", body);
         var text = $"{facilityName} hat eine Bestellung abgesendet. {portionen} Portionen insgesamt, Frist: {deadlineAtUtc:dd.MM.yyyy HH:mm} Uhr.";
         foreach (var user in empfaenger)
             await email.SendAsync(user.Email, user.Name, $"Neue Bestellung von {facilityName}", html, text);

@@ -251,11 +251,11 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
     {
         var baseUrl = appOptions.Value.PublicBaseUrl.TrimEnd('/');
         var resetUrl = $"{baseUrl}/accept-invite/{user.InvitationToken}";
-        var html = $"""
-            <p>Für Ihr Daily-Gourmet-Konto wurde ein Zurücksetzen des Passworts angefordert. Klicken Sie auf den folgenden Link, um ein neues Passwort festzulegen:</p>
-            <p><a href="{resetUrl}">Passwort zurücksetzen</a></p>
+        var body = $"""
+            <p>Für Ihr Daily-Gourmet-Konto wurde ein Zurücksetzen des Passworts angefordert. Klicken Sie auf den Button unten, um ein neues Passwort festzulegen.</p>
             <p>Der Link ist 72 Stunden gültig. Haben Sie dies nicht angefordert, können Sie diese E-Mail ignorieren.</p>
             """;
+        var html = EmailTemplate.Render("Passwort zurücksetzen für Ihr Daily-Gourmet-Konto.", body, "Passwort zurücksetzen", resetUrl);
         var text = $"Für Ihr Daily-Gourmet-Konto wurde ein Zurücksetzen des Passworts angefordert. Neues Passwort festlegen: {resetUrl}\nDer Link ist 72 Stunden gültig.";
         await email.SendAsync(user.Email, user.Name, "Passwort zurücksetzen — Daily Gourmet", html, text);
     }
@@ -264,11 +264,11 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
     {
         var baseUrl = appOptions.Value.PublicBaseUrl.TrimEnd('/');
         var acceptUrl = $"{baseUrl}/accept-invite/{token}";
-        var html = $"""
-            <p>Sie wurden zu Daily Gourmet eingeladen. Klicken Sie auf den folgenden Link, um Ihr Passwort festzulegen und Ihr Konto zu aktivieren:</p>
-            <p><a href="{acceptUrl}">Konto aktivieren</a></p>
+        var body = $"""
+            <p>Sie wurden zu Daily Gourmet eingeladen. Klicken Sie auf den Button unten, um Ihr Passwort festzulegen und Ihr Konto zu aktivieren.</p>
             <p>Der Link ist 72 Stunden gültig.</p>
             """;
+        var html = EmailTemplate.Render("Sie wurden zu Daily Gourmet eingeladen.", body, "Konto aktivieren", acceptUrl);
         var text = $"Sie wurden zu Daily Gourmet eingeladen. Passwort festlegen: {acceptUrl}\nDer Link ist 72 Stunden gültig.";
         await email.SendAsync(user.Email, user.Name, "Einladung zu Daily Gourmet", html, text);
     }

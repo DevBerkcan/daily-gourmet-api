@@ -99,11 +99,11 @@ public class UserManagementHandler(IRepository<User> users, ITenantContext tenan
     {
         var baseUrl = appOptions.Value.PublicBaseUrl.TrimEnd('/');
         var acceptUrl = $"{baseUrl}/accept-invite/{user.InvitationToken}";
-        var html = $"""
-            <p>Sie wurden zu Daily Gourmet eingeladen. Klicken Sie auf den folgenden Link, um Ihr Passwort festzulegen und Ihr Konto zu aktivieren:</p>
-            <p><a href="{acceptUrl}">Konto aktivieren</a></p>
+        var body = $"""
+            <p>Sie wurden zu Daily Gourmet eingeladen. Klicken Sie auf den Button unten, um Ihr Passwort festzulegen und Ihr Konto zu aktivieren.</p>
             <p>Der Link ist 72 Stunden gültig.</p>
             """;
+        var html = EmailTemplate.Render("Sie wurden zu Daily Gourmet eingeladen.", body, "Konto aktivieren", acceptUrl);
         var text = $"Sie wurden zu Daily Gourmet eingeladen. Passwort festlegen: {acceptUrl}\nDer Link ist 72 Stunden gültig.";
         await email.SendAsync(user.Email, user.Name, "Einladung zu Daily Gourmet", html, text);
     }
