@@ -54,6 +54,9 @@ public class DeliveryRouteDto
     public bool HandoffDessertConfirmed { get; set; }
     public DateTime? HandoffConfirmedAt { get; set; }
     public List<RouteStopDto> Stops { get; set; } = [];
+    /// <summary>Nur bei der Erstellung befüllt: Namen der angefragten Einrichtungen, die wegen einer
+    /// FacilityClosure an diesem Datum nicht als Stopp aufgenommen wurden.</summary>
+    public List<string> SkippedClosedFacilities { get; set; } = [];
 }
 
 public class CreateRouteDto

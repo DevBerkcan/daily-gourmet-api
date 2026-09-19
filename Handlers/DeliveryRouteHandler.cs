@@ -54,15 +54,33 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
         };
         db.Routes.Add(route);
 
-        for (var i = 0; i < dto.FacilityIds.Length; i++)
+        // Einrichtungen, die an diesem Datum laut FacilityClosure geschlossen haben, werden nicht als
+        // Stopp aufgenommen — der Admin sieht stattdessen im Rückgabewert (SkippedClosedFacilities),
+        // welche Einrichtungen deshalb übersprungen wurden.
+        var closedFacilityIds = await db.FacilityClosures
+            .Where(c => dto.FacilityIds.Contains(c.FacilityId) && c.StartDate <= dto.Date && dto.Date <= c.EndDate)
+            .Select(c => c.FacilityId)
+            .Distinct()
+            .ToListAsync(ct);
+        var skippedFacilityNames = new List<string>();
+
+        var sequenceNumber = 1;
+        foreach (var facilityId in dto.FacilityIds)
         {
-            var facility = await db.Facilities.FirstOrDefaultAsync(f => f.Id == dto.FacilityIds[i], ct) ?? throw new NotFoundException(nameof(Facility), dto.FacilityIds[i]);
+            var facility = await db.Facilities.FirstOrDefaultAsync(f => f.Id == facilityId, ct) ?? throw new NotFoundException(nameof(Facility), facilityId);
+            if (closedFacilityIds.Contains(facilityId))
+            {
+                skippedFacilityNames.Add(facility.Name);
+                continue;
+            }
+
             var stop = new RouteStop
             {
-                Id = Guid.NewGuid(), RouteId = route.Id, FacilityId = facility.Id, SequenceNumber = i + 1,
-                PlannedArrivalTime = dto.PlannedDepartureTime.Add(TimeSpan.FromMinutes(30 * (i + 1))),
+                Id = Guid.NewGuid(), RouteId = route.Id, FacilityId = facility.Id, SequenceNumber = sequenceNumber,
+                PlannedArrivalTime = dto.PlannedDepartureTime.Add(TimeSpan.FromMinutes(30 * sequenceNumber)),
                 ContactName = facility.ContactPerson, ContactPhone = facility.Phone, Status = RouteStopStatus.OFFEN, CreatedAt = DateTime.UtcNow,
             };
+            sequenceNumber++;
             db.RouteStops.Add(stop);
 
             var orderItems = await db.OrderItems
@@ -81,7 +99,9 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
         }
 
         await db.SaveChangesAsync(ct);
-        return await GetByIdAsync(route.Id, ct);
+        var result = await GetByIdAsync(route.Id, ct);
+        result.SkippedClosedFacilities = skippedFacilityNames;
+        return result;
     }
 
     public async Task<DeliveryRouteDto> UpdateStatusAsync(Guid id, UpdateStatusDto dto, CancellationToken ct = default)

@@ -225,9 +225,12 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
             .FirstOrDefaultAsync(m => m.Id == mealPlanId, ct) ?? throw new NotFoundException(nameof(MealPlan), mealPlanId);
         var facility = await db.Facilities.FirstOrDefaultAsync(f => f.Id == facilityId, ct) ?? throw new NotFoundException(nameof(Facility), facilityId);
         var activeAbbreviations = facility.ActiveWeekdays.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+        var closures = await db.FacilityClosures.Where(c => c.FacilityId == facilityId).ToListAsync(ct);
+        bool IsClosed(DateOnly date) => closures.Any(c => c.StartDate <= date && date <= c.EndDate);
 
         var expected = mealPlan.Days
             .Where(d => activeAbbreviations.Contains(WeekdayAbbreviation.GetValueOrDefault(d.Weekday, d.Weekday)))
+            .Where(d => !IsClosed(d.Date))
             .SelectMany(d => d.Items.Select(i => new { d.Date, i.RecipeId, RecipeName = i.Recipe?.Name ?? "Gericht" }))
             .ToList();
         var provided = items.Select(i => (i.Date, i.RecipeId)).ToHashSet();
