@@ -41,6 +41,17 @@ public class Facility : BaseEntity, ITenantScoped
     /// <summary>CSV of active weekdays, e.g. "Mo,Di,Mi,Do,Fr".</summary>
     public string ActiveWeekdays { get; set; } = "Mo,Di,Mi,Do,Fr";
 
+    /// <summary>Zusagetes Lieferfenster (z. B. 07:30–08:00) — wird bei Routenerstellung auf den
+    /// jeweiligen RouteStop übertragen (siehe DeliveryRouteHandler.CreateAsync).</summary>
+    public TimeSpan? DeliveryWindowStart { get; set; }
+    public TimeSpan? DeliveryWindowEnd { get; set; }
+    /// <summary>Erwarteter Zeitaufwand vor Ort in Minuten (Ausladen, ggf. Treppen/mehrere Wege) —
+    /// fließt in die geplante Ankunftszeit nachfolgender Stopps auf derselben Route ein.</summary>
+    public int? DeliveryDurationMinutes { get; set; }
+    /// <summary>Besonderheiten bei der Anlieferung (z. B. steile Treppe, kein Rollwagen möglich,
+    /// Temperaturkontrolle) — bewusst getrennt von <see cref="Notes"/>, das für allgemeine Vermerke ist.</summary>
+    public string? DeliveryRequirements { get; set; }
+
     public decimal PortionPrice { get; set; }
     public FacilityStatus Status { get; set; } = FacilityStatus.AKTIV;
     public string? Notes { get; set; }

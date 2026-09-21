@@ -87,6 +87,10 @@ public class FacilityHandler(
             Email = email,
             Phone = dto.Phone.Trim(),
             ActiveWeekdays = dto.ActiveWeekdays,
+            DeliveryWindowStart = dto.DeliveryWindowStart,
+            DeliveryWindowEnd = dto.DeliveryWindowEnd,
+            DeliveryDurationMinutes = dto.DeliveryDurationMinutes,
+            DeliveryRequirements = dto.DeliveryRequirements,
             PortionPrice = dto.PortionPrice,
             Status = FacilityStatus.AKTIV,
             Notes = dto.Notes,
@@ -141,6 +145,10 @@ public class FacilityHandler(
         facility.Email = dto.Email.Trim();
         facility.Phone = dto.Phone.Trim();
         facility.ActiveWeekdays = dto.ActiveWeekdays;
+        facility.DeliveryWindowStart = dto.DeliveryWindowStart;
+        facility.DeliveryWindowEnd = dto.DeliveryWindowEnd;
+        facility.DeliveryDurationMinutes = dto.DeliveryDurationMinutes;
+        facility.DeliveryRequirements = dto.DeliveryRequirements;
         facility.PortionPrice = dto.PortionPrice;
         facility.Status = status;
         facility.Notes = dto.Notes;
@@ -230,6 +238,10 @@ public class FacilityHandler(
         LocationId = f.LocationId,
         LocationName = f.Location?.Name ?? string.Empty,
         ActiveWeekdays = f.ActiveWeekdays,
+        DeliveryWindowStart = f.DeliveryWindowStart,
+        DeliveryWindowEnd = f.DeliveryWindowEnd,
+        DeliveryDurationMinutes = f.DeliveryDurationMinutes,
+        DeliveryRequirements = f.DeliveryRequirements,
         PortionPrice = f.PortionPrice,
         Status = f.Status.ToString(),
         Notes = f.Notes,

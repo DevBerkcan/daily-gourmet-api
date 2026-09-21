@@ -57,6 +57,9 @@ public class DeliveryRouteDto
     /// <summary>Nur bei der Erstellung befüllt: Namen der angefragten Einrichtungen, die wegen einer
     /// FacilityClosure an diesem Datum nicht als Stopp aufgenommen wurden.</summary>
     public List<string> SkippedClosedFacilities { get; set; } = [];
+    /// <summary>Nur bei der Erstellung befüllt: Stopps, deren grob geschätzte Ankunftszeit außerhalb
+    /// des bei der Einrichtung hinterlegten Lieferfensters liegt — zur Kontrolle durch den Admin.</summary>
+    public List<string> ArrivalOutsideWindowWarnings { get; set; } = [];
 }
 
 public class CreateRouteDto
@@ -82,6 +85,12 @@ public class UpdateStopStatusDto
 {
     [Required] public string Status { get; set; } = string.Empty;
     public string? ProblemNote { get; set; }
+}
+
+/// <summary>Fahrer-Tausch eines einzelnen Stopps — siehe DeliveryRouteHandler.TransferStopAsync.</summary>
+public class TransferStopDto
+{
+    [Required] public Guid TargetRouteId { get; set; }
 }
 
 public class DriverDto

@@ -14,6 +14,10 @@ public class FacilityDto
     public Guid LocationId { get; set; }
     public string LocationName { get; set; } = string.Empty;
     public string ActiveWeekdays { get; set; } = string.Empty;
+    public TimeSpan? DeliveryWindowStart { get; set; }
+    public TimeSpan? DeliveryWindowEnd { get; set; }
+    public int? DeliveryDurationMinutes { get; set; }
+    public string? DeliveryRequirements { get; set; }
     public decimal PortionPrice { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? Notes { get; set; }
@@ -46,6 +50,15 @@ public class CreateFacilityDto
     public Guid LocationId { get; set; }
 
     public string ActiveWeekdays { get; set; } = "Mo,Di,Mi,Do,Fr";
+
+    public TimeSpan? DeliveryWindowStart { get; set; }
+    public TimeSpan? DeliveryWindowEnd { get; set; }
+
+    [Range(1, 480)]
+    public int? DeliveryDurationMinutes { get; set; }
+
+    [MaxLength(1000)]
+    public string? DeliveryRequirements { get; set; }
 
     [Range(0, 1000)]
     public decimal PortionPrice { get; set; }

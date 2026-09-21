@@ -57,6 +57,16 @@ public class RoutesController(DeliveryRouteHandler handler) : ControllerBase
     public async Task<ActionResult<ApiResponse<DeliveryRouteDto>>> Claim(Guid id, CancellationToken ct) =>
         Ok(ApiResponse<DeliveryRouteDto>.Ok(await handler.ClaimAsync(id, ct)));
 
+    [HttpPost("{id:guid}/release")]
+    [Authorize(Roles = "DRIVER")]
+    public async Task<ActionResult<ApiResponse<DeliveryRouteDto>>> Release(Guid id, CancellationToken ct) =>
+        Ok(ApiResponse<DeliveryRouteDto>.Ok(await handler.ReleaseAsync(id, ct)));
+
+    [HttpPost("{routeId:guid}/stops/{stopId:guid}/transfer")]
+    [Authorize(Roles = "DRIVER")]
+    public async Task<ActionResult<ApiResponse<DeliveryRouteDto>>> TransferStop(Guid routeId, Guid stopId, [FromBody] TransferStopDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<DeliveryRouteDto>.Ok(await handler.TransferStopAsync(routeId, stopId, dto, ct)));
+
     [HttpPut("{id:guid}/handoff")]
     [Authorize(Roles = "DRIVER")]
     public async Task<ActionResult<ApiResponse<DeliveryRouteDto>>> Handoff(Guid id, [FromBody] ConfirmHandoffDto dto, CancellationToken ct) =>

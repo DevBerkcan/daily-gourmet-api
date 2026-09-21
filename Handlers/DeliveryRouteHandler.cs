@@ -63,8 +63,13 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
             .Distinct()
             .ToListAsync(ct);
         var skippedFacilityNames = new List<string>();
+        var windowWarnings = new List<string>();
 
         var sequenceNumber = 1;
+        // Grobe Zeitschätzung mangels echter Distanzdaten: feste 30 Minuten Fahrzeit zwischen zwei
+        // Stopps, plus die bei der Einrichtung hinterlegte Lieferdauer (Standard 15 Minuten), bevor
+        // die Fahrt zum nächsten Stopp beginnt.
+        var uhrzeit = dto.PlannedDepartureTime;
         foreach (var facilityId in dto.FacilityIds)
         {
             var facility = await db.Facilities.FirstOrDefaultAsync(f => f.Id == facilityId, ct) ?? throw new NotFoundException(nameof(Facility), facilityId);
@@ -74,12 +79,19 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
                 continue;
             }
 
+            uhrzeit = uhrzeit.Add(TimeSpan.FromMinutes(30));
             var stop = new RouteStop
             {
                 Id = Guid.NewGuid(), RouteId = route.Id, FacilityId = facility.Id, SequenceNumber = sequenceNumber,
-                PlannedArrivalTime = dto.PlannedDepartureTime.Add(TimeSpan.FromMinutes(30 * sequenceNumber)),
-                ContactName = facility.ContactPerson, ContactPhone = facility.Phone, Status = RouteStopStatus.OFFEN, CreatedAt = DateTime.UtcNow,
+                PlannedArrivalTime = uhrzeit,
+                DeliveryWindowStart = facility.DeliveryWindowStart, DeliveryWindowEnd = facility.DeliveryWindowEnd,
+                ContactName = facility.ContactPerson, ContactPhone = facility.Phone, Note = facility.DeliveryRequirements,
+                Status = RouteStopStatus.OFFEN, CreatedAt = DateTime.UtcNow,
             };
+            if (facility.DeliveryWindowStart is { } ws && facility.DeliveryWindowEnd is { } we && (uhrzeit < ws || uhrzeit > we))
+                windowWarnings.Add($"{facility.Name} (geplant {uhrzeit:hh\\:mm} Uhr, Fenster {ws:hh\\:mm}–{we:hh\\:mm} Uhr)");
+
+            uhrzeit = uhrzeit.Add(TimeSpan.FromMinutes(facility.DeliveryDurationMinutes ?? 15));
             sequenceNumber++;
             db.RouteStops.Add(stop);
 
@@ -101,6 +113,7 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
         await db.SaveChangesAsync(ct);
         var result = await GetByIdAsync(route.Id, ct);
         result.SkippedClosedFacilities = skippedFacilityNames;
+        result.ArrivalOutsideWindowWarnings = windowWarnings;
         return result;
     }
 
@@ -138,6 +151,55 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
         route.DriverId = driver.Id;
         route.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+        return await GetByIdAsync(routeId, ct);
+    }
+
+    /// <summary>Reverses ClaimAsync — lets a driver give an unstarted route back to the unassigned
+    /// pool (e.g. sick) so another driver can claim the whole tour. Only allowed before loading
+    /// starts, mirroring the GEPLANT-only restriction on ClaimAsync itself.</summary>
+    public async Task<DeliveryRouteDto> ReleaseAsync(Guid routeId, CancellationToken ct = default)
+    {
+        var driver = await GetCallerDriverAsync(ct);
+        var route = await db.Routes.FirstOrDefaultAsync(r => r.Id == routeId, ct) ?? throw new NotFoundException(nameof(DeliveryRoute), routeId);
+        if (route.DriverId != driver.Id) throw new ForbiddenException("Kein Zugriff auf diese Route.");
+        if (route.Status != RouteStatus.GEPLANT) throw new ConflictException("Nur eine noch nicht gestartete Route kann zurückgegeben werden.");
+
+        route.DriverId = null;
+        route.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        // Not GetByIdAsync: its DRIVER-role check would now reject the caller, since DriverId was
+        // just cleared — but the caller who released it is still entitled to see the result.
+        var updated = await FullQuery(db).FirstAsync(r => r.Id == routeId, ct);
+        return ToDto(updated);
+    }
+
+    /// <summary>Lets the driver holding a stop hand it directly to another driver's route for the
+    /// same day, without office involvement — "Fahrer A kann kurzfristig nicht, Fahrer B übernimmt
+    /// diesen Stopp". The stop (and its RouteStopItems, which follow via RouteStopId) moves onto the
+    /// end of the target route; no accept step, the drivers coordinate the handoff themselves.</summary>
+    public async Task<DeliveryRouteDto> TransferStopAsync(Guid routeId, Guid stopId, TransferStopDto dto, CancellationToken ct = default)
+    {
+        var driver = await GetCallerDriverAsync(ct);
+        var route = await db.Routes.FirstOrDefaultAsync(r => r.Id == routeId, ct) ?? throw new NotFoundException(nameof(DeliveryRoute), routeId);
+        if (route.DriverId != driver.Id) throw new ForbiddenException("Kein Zugriff auf diese Route.");
+
+        var stop = await db.RouteStops.FirstOrDefaultAsync(s => s.Id == stopId && s.RouteId == routeId, ct) ?? throw new NotFoundException(nameof(RouteStop), stopId);
+        if (stop.Status != RouteStopStatus.OFFEN) throw new ConflictException("Nur ein noch offener Stopp kann übergeben werden.");
+
+        if (dto.TargetRouteId == routeId) throw new ValidationException("Zielroute muss eine andere Route sein.");
+        var targetRoute = await db.Routes.FirstOrDefaultAsync(r => r.Id == dto.TargetRouteId, ct) ?? throw new NotFoundException(nameof(DeliveryRoute), dto.TargetRouteId);
+        if (targetRoute.Date != route.Date) throw new ValidationException("Zielroute muss für denselben Tag sein.");
+        if (targetRoute.DriverId is null) throw new ValidationException("Zielroute hat noch keinen Fahrer — der Zielfahrer muss die Route zuerst übernehmen.");
+        if (targetRoute.Status == RouteStatus.ABGESCHLOSSEN) throw new ConflictException("Zielroute ist bereits abgeschlossen.");
+
+        var maxSequence = await db.RouteStops.Where(s => s.RouteId == targetRoute.Id).Select(s => (int?)s.SequenceNumber).MaxAsync(ct) ?? 0;
+        stop.RouteId = targetRoute.Id;
+        stop.SequenceNumber = maxSequence + 1;
+        stop.PlannedArrivalTime = targetRoute.PlannedDepartureTime.Add(TimeSpan.FromMinutes(30 * stop.SequenceNumber));
+        stop.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+
         return await GetByIdAsync(routeId, ct);
     }
 
