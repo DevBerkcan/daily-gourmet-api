@@ -21,10 +21,14 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
         .Include(r => r.Stops).ThenInclude(s => s.Facility)
         .Include(r => r.Stops).ThenInclude(s => s.Items).ThenInclude(i => i.Recipe);
 
-    public async Task<PagedResult<DeliveryRouteDto>> ListAsync(DateOnly? date, Guid? driverId, string? status, bool? unassigned, int page, int pageSize, CancellationToken ct = default)
+    public async Task<PagedResult<DeliveryRouteDto>> ListAsync(DateOnly? date, DateOnly? dateFrom, DateOnly? dateTo, Guid? driverId, string? status, bool? unassigned, int page, int pageSize, CancellationToken ct = default)
     {
         var query = FullQuery(db).AsQueryable();
         if (date is { } d) query = query.Where(r => r.Date == d);
+        // dateFrom/dateTo: used by the week view (Wochenplanung) to fetch a whole KW (Mo–So) in one
+        // call instead of paging through the unfiltered list client-side.
+        if (dateFrom is { } df) query = query.Where(r => r.Date >= df);
+        if (dateTo is { } dt) query = query.Where(r => r.Date <= dt);
         if (driverId is { } did) query = query.Where(r => r.DriverId == did);
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<RouteStatus>(status, out var s)) query = query.Where(r => r.Status == s);
         if (unassigned == true) query = query.Where(r => r.DriverId == null);
@@ -54,6 +58,136 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
         };
         db.Routes.Add(route);
 
+        var (skippedFacilityNames, windowWarnings) = await BuildStopsAsync(route.Id, dto, ct);
+
+        await db.SaveChangesAsync(ct);
+        var result = await GetByIdAsync(route.Id, ct);
+        result.SkippedClosedFacilities = skippedFacilityNames;
+        result.ArrivalOutsideWindowWarnings = windowWarnings;
+        return result;
+    }
+
+    /// <summary>Kurzfristig einen Sonderauftrag/Zusatzkunden an eine bestehende Route anhängen —
+    /// anders als UpdateAsync auch möglich, während die Tour schon BELADUNG/UNTERWEGS ist (nur
+    /// ABGESCHLOSSEN sperrt), da genau das der im Termin beschriebene Fall ist ("zusätzlicher
+    /// Kunde/Sonderauftrag" kurz vor oder während der Abfahrt). Zieht wie beim regulären Aufbau die
+    /// verbindlichen Bestellungen der Einrichtung für das Routendatum als Ladepositionen mit.</summary>
+    public async Task<DeliveryRouteDto> AddStopAsync(Guid routeId, AddStopDto dto, CancellationToken ct = default)
+    {
+        var route = await db.Routes.Include(r => r.Stops).FirstOrDefaultAsync(r => r.Id == routeId, ct) ?? throw new NotFoundException(nameof(DeliveryRoute), routeId);
+        if (route.Status == RouteStatus.ABGESCHLOSSEN) throw new ConflictException("Eine abgeschlossene Route kann nicht mehr geändert werden.");
+        if (route.Stops.Any(s => s.FacilityId == dto.FacilityId)) throw new ConflictException("Diese Einrichtung ist bereits Teil der Route.");
+
+        var facility = await db.Facilities.FirstOrDefaultAsync(f => f.Id == dto.FacilityId, ct) ?? throw new NotFoundException(nameof(Facility), dto.FacilityId);
+        var sequenceNumber = (route.Stops.Count == 0 ? 0 : route.Stops.Max(s => s.SequenceNumber)) + 1;
+        var stop = new RouteStop
+        {
+            Id = Guid.NewGuid(), RouteId = route.Id, FacilityId = facility.Id, SequenceNumber = sequenceNumber,
+            PlannedArrivalTime = route.PlannedDepartureTime.Add(TimeSpan.FromMinutes(30 * sequenceNumber)),
+            DeliveryWindowStart = facility.DeliveryWindowStart, DeliveryWindowEnd = facility.DeliveryWindowEnd,
+            ContactName = facility.ContactPerson, ContactPhone = facility.Phone, Note = facility.DeliveryRequirements,
+            Status = RouteStopStatus.OFFEN, CreatedAt = DateTime.UtcNow,
+        };
+        db.RouteStops.Add(stop);
+
+        var orderItems = await db.OrderItems
+            .Include(oi => oi.Order)
+            .Where(oi => oi.Order.FacilityId == facility.Id && BindingStatuses.Contains(oi.Order.Status) && oi.Date == route.Date)
+            .ToListAsync(ct);
+        foreach (var orderItem in orderItems)
+        {
+            db.RouteStopItems.Add(new RouteStopItem
+            {
+                Id = Guid.NewGuid(), RouteStopId = stop.Id, RecipeId = orderItem.RecipeId, OrderId = orderItem.OrderId, OrderItemId = orderItem.Id,
+                Portions = orderItem.Portions, ContainerDescription = $"{Math.Ceiling(orderItem.Portions / 15.0)} × GN 1/1",
+                TemperatureRequirement = "mind. 65 °C", CreatedAt = DateTime.UtcNow,
+            });
+        }
+
+        await db.SaveChangesAsync(ct);
+        return await GetByIdAsync(routeId, ct);
+    }
+
+    /// <summary>Übernimmt eine komplette Woche (alle Routen von Montag–Sonntag) als Ausgangspunkt für
+    /// eine andere Woche — gleicher Name/Fahrer/Standort/Abfahrt/Kundenliste, nur auf den
+    /// entsprechenden Wochentag der Zielwoche verschoben. Stopps werden wie bei Create/Update frisch
+    /// aus den aktuellen Einrichtungsdaten und Bestellungen der Zielwoche aufgebaut (nicht aus der
+    /// Quellwoche kopiert), damit Schließtage/Bestellungen der Zielwoche korrekt berücksichtigt
+    /// werden. Bereits existierende Routen (gleicher Name + Datum) in der Zielwoche werden
+    /// übersprungen, damit ein versehentliches Doppelklicken keine Duplikate anlegt.</summary>
+    public async Task<DuplicateWeekResultDto> DuplicateWeekAsync(DuplicateWeekDto dto, CancellationToken ct = default)
+    {
+        var sourceEnd = dto.SourceWeekStart.AddDays(6);
+        var sourceRoutes = await db.Routes.Include(r => r.Stops)
+            .Where(r => r.Date >= dto.SourceWeekStart && r.Date <= sourceEnd)
+            .OrderBy(r => r.Date)
+            .ToListAsync(ct);
+
+        var result = new DuplicateWeekResultDto();
+        foreach (var source in sourceRoutes)
+        {
+            var offsetDays = source.Date.DayNumber - dto.SourceWeekStart.DayNumber;
+            var targetDate = dto.TargetWeekStart.AddDays(offsetDays);
+
+            if (await db.Routes.AnyAsync(r => r.Date == targetDate && r.Name == source.Name, ct))
+            {
+                result.SkippedExisting.Add($"{source.Name} ({targetDate:dd.MM.yyyy})");
+                continue;
+            }
+
+            var facilityIds = source.Stops.OrderBy(s => s.SequenceNumber).Select(s => s.FacilityId).ToArray();
+            var createDto = new CreateRouteDto
+            {
+                Name = source.Name, Date = targetDate, DriverId = source.DriverId, LocationId = source.LocationId,
+                PlannedDepartureTime = source.PlannedDepartureTime, FacilityIds = facilityIds,
+            };
+            var newRoute = new DeliveryRoute
+            {
+                Id = Guid.NewGuid(), TenantId = tenantContext.TenantId!.Value, Name = createDto.Name, Date = createDto.Date,
+                DriverId = createDto.DriverId, LocationId = createDto.LocationId, PlannedDepartureTime = createDto.PlannedDepartureTime,
+                Status = RouteStatus.GEPLANT,
+            };
+            db.Routes.Add(newRoute);
+            await BuildStopsAsync(newRoute.Id, createDto, ct);
+            result.CreatedCount++;
+        }
+
+        await db.SaveChangesAsync(ct);
+        return result;
+    }
+
+    /// <summary>Lets an admin edit a route they (or a colleague) created — name, date, driver,
+    /// location, departure time and the facility/stop list. Only while still GEPLANT: once loading
+    /// has started, stops carry driver progress (packed/loaded/delivered) that a rebuild would lose.
+    /// Rebuilds the stop list from scratch the same way CreateAsync does (cascade-deletes the old
+    /// stops and their items, see RouteStopConfiguration/RouteStopItemConfiguration).</summary>
+    public async Task<DeliveryRouteDto> UpdateAsync(Guid id, CreateRouteDto dto, CancellationToken ct = default)
+    {
+        var route = await db.Routes.Include(r => r.Stops).FirstOrDefaultAsync(r => r.Id == id, ct) ?? throw new NotFoundException(nameof(DeliveryRoute), id);
+        if (route.Status != RouteStatus.GEPLANT) throw new ConflictException("Nur eine noch nicht gestartete Route kann bearbeitet werden.");
+
+        route.Name = dto.Name;
+        route.Date = dto.Date;
+        route.DriverId = dto.DriverId;
+        route.LocationId = dto.LocationId;
+        route.PlannedDepartureTime = dto.PlannedDepartureTime;
+        route.UpdatedAt = DateTime.UtcNow;
+
+        db.RouteStops.RemoveRange(route.Stops);
+        var (skippedFacilityNames, windowWarnings) = await BuildStopsAsync(route.Id, dto, ct);
+
+        await db.SaveChangesAsync(ct);
+        var result = await GetByIdAsync(id, ct);
+        result.SkippedClosedFacilities = skippedFacilityNames;
+        result.ArrivalOutsideWindowWarnings = windowWarnings;
+        return result;
+    }
+
+    /// <summary>Shared by CreateAsync/UpdateAsync: adds a RouteStop (+ its RouteStopItems from
+    /// binding orders of that date) per requested facility, skipping ones closed that day and
+    /// warning about ones whose estimated arrival misses their delivery window. Does not save.</summary>
+    private async Task<(List<string> skippedFacilityNames, List<string> windowWarnings)> BuildStopsAsync(Guid routeId, CreateRouteDto dto, CancellationToken ct)
+    {
         // Einrichtungen, die an diesem Datum laut FacilityClosure geschlossen haben, werden nicht als
         // Stopp aufgenommen — der Admin sieht stattdessen im Rückgabewert (SkippedClosedFacilities),
         // welche Einrichtungen deshalb übersprungen wurden.
@@ -82,7 +216,7 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
             uhrzeit = uhrzeit.Add(TimeSpan.FromMinutes(30));
             var stop = new RouteStop
             {
-                Id = Guid.NewGuid(), RouteId = route.Id, FacilityId = facility.Id, SequenceNumber = sequenceNumber,
+                Id = Guid.NewGuid(), RouteId = routeId, FacilityId = facility.Id, SequenceNumber = sequenceNumber,
                 PlannedArrivalTime = uhrzeit,
                 DeliveryWindowStart = facility.DeliveryWindowStart, DeliveryWindowEnd = facility.DeliveryWindowEnd,
                 ContactName = facility.ContactPerson, ContactPhone = facility.Phone, Note = facility.DeliveryRequirements,
@@ -110,11 +244,7 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
             }
         }
 
-        await db.SaveChangesAsync(ct);
-        var result = await GetByIdAsync(route.Id, ct);
-        result.SkippedClosedFacilities = skippedFacilityNames;
-        result.ArrivalOutsideWindowWarnings = windowWarnings;
-        return result;
+        return (skippedFacilityNames, windowWarnings);
     }
 
     public async Task<DeliveryRouteDto> UpdateStatusAsync(Guid id, UpdateStatusDto dto, CancellationToken ct = default)

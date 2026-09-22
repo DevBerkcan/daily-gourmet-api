@@ -93,6 +93,26 @@ public class TransferStopDto
     [Required] public Guid TargetRouteId { get; set; }
 }
 
+/// <summary>Kurzfristiger Sonderauftrag/Zusatzkunde — siehe DeliveryRouteHandler.AddStopAsync.</summary>
+public class AddStopDto
+{
+    [Required] public Guid FacilityId { get; set; }
+}
+
+/// <summary>Woche duplizieren — siehe DeliveryRouteHandler.DuplicateWeekAsync. Beide Daten sind der
+/// Montag der jeweiligen Woche.</summary>
+public class DuplicateWeekDto
+{
+    [Required] public DateOnly SourceWeekStart { get; set; }
+    [Required] public DateOnly TargetWeekStart { get; set; }
+}
+
+public class DuplicateWeekResultDto
+{
+    public int CreatedCount { get; set; }
+    public List<string> SkippedExisting { get; set; } = [];
+}
+
 public class DriverDto
 {
     public Guid Id { get; set; }

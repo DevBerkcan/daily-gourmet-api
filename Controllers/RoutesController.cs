@@ -15,12 +15,22 @@ public class RoutesController(DeliveryRouteHandler handler) : ControllerBase
     [HttpGet]
     [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,DRIVER")]
     public async Task<ActionResult<ApiResponse<PagedResult<DeliveryRouteDto>>>> List(
-        [FromQuery] DateOnly? date, [FromQuery] Guid? driverId, [FromQuery] string? status, [FromQuery] bool? unassigned,
+        [FromQuery] DateOnly? date, [FromQuery] DateOnly? dateFrom, [FromQuery] DateOnly? dateTo, [FromQuery] Guid? driverId, [FromQuery] string? status, [FromQuery] bool? unassigned,
         [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default)
     {
-        var result = await handler.ListAsync(date, driverId, status, unassigned, page, pageSize, ct);
+        var result = await handler.ListAsync(date, dateFrom, dateTo, driverId, status, unassigned, page, pageSize, ct);
         return Ok(ApiResponse<PagedResult<DeliveryRouteDto>>.Ok(result));
     }
+
+    [HttpPost("duplicate-week")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse<DuplicateWeekResultDto>>> DuplicateWeek([FromBody] DuplicateWeekDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<DuplicateWeekResultDto>.Ok(await handler.DuplicateWeekAsync(dto, ct)));
+
+    [HttpPost("{routeId:guid}/stops")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse<DeliveryRouteDto>>> AddStop(Guid routeId, [FromBody] AddStopDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<DeliveryRouteDto>.Ok(await handler.AddStopAsync(routeId, dto, ct)));
 
     [HttpGet("{id:guid}")]
     [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,DRIVER")]
@@ -31,6 +41,11 @@ public class RoutesController(DeliveryRouteHandler handler) : ControllerBase
     [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<DeliveryRouteDto>>> Create([FromBody] CreateRouteDto dto, CancellationToken ct) =>
         Ok(ApiResponse<DeliveryRouteDto>.Ok(await handler.CreateAsync(dto, ct)));
+
+    [HttpPut("{id:guid}")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse<DeliveryRouteDto>>> Update(Guid id, [FromBody] CreateRouteDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<DeliveryRouteDto>.Ok(await handler.UpdateAsync(id, dto, ct)));
 
     [HttpPut("{id:guid}/status")]
     [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,DRIVER")]
