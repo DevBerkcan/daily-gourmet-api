@@ -156,6 +156,16 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
         return result;
     }
 
+    /// <summary>Hard delete — allowed regardless of status (GEPLANT through ABGESCHLOSSEN); an admin
+    /// may need to remove a route created by mistake or a duplicate, and RouteStop/RouteStopItem both
+    /// cascade-delete from DeliveryRoute, so nothing is left orphaned.</summary>
+    public async Task DeleteAsync(Guid id, CancellationToken ct = default)
+    {
+        var route = await db.Routes.FirstOrDefaultAsync(r => r.Id == id, ct) ?? throw new NotFoundException(nameof(DeliveryRoute), id);
+        db.Routes.Remove(route);
+        await db.SaveChangesAsync(ct);
+    }
+
     /// <summary>Lets an admin edit a route they (or a colleague) created — name, date, driver,
     /// location, departure time and the facility/stop list. Only while still GEPLANT: once loading
     /// has started, stops carry driver progress (packed/loaded/delivered) that a rebuild would lose.

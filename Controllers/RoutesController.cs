@@ -47,6 +47,14 @@ public class RoutesController(DeliveryRouteHandler handler) : ControllerBase
     public async Task<ActionResult<ApiResponse<DeliveryRouteDto>>> Update(Guid id, [FromBody] CreateRouteDto dto, CancellationToken ct) =>
         Ok(ApiResponse<DeliveryRouteDto>.Ok(await handler.UpdateAsync(id, dto, ct)));
 
+    [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse>> Delete(Guid id, CancellationToken ct)
+    {
+        await handler.DeleteAsync(id, ct);
+        return Ok(ApiResponse.Ok());
+    }
+
     [HttpPut("{id:guid}/status")]
     [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,DRIVER")]
     public async Task<ActionResult<ApiResponse<DeliveryRouteDto>>> UpdateStatus(Guid id, [FromBody] UpdateStatusDto dto, CancellationToken ct) =>

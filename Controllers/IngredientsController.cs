@@ -52,6 +52,14 @@ public class IngredientsController(IngredientHandler handler) : ControllerBase
         return Ok(ApiResponse.Ok());
     }
 
+    [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse>> Delete(Guid id, CancellationToken ct)
+    {
+        await handler.DeleteAsync(id, ct);
+        return Ok(ApiResponse.Ok());
+    }
+
     [HttpPost("sync")]
     [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<SyncResultDto>>> Sync([FromBody] List<RezeptrechnerImportRowDto> rows, CancellationToken ct)

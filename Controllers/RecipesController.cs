@@ -60,6 +60,14 @@ public class RecipesController(RecipeHandler handler) : ControllerBase
         return Ok(ApiResponse.Ok());
     }
 
+    [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse>> Delete(Guid id, CancellationToken ct)
+    {
+        await handler.DeleteAsync(id, ct);
+        return Ok(ApiResponse.Ok());
+    }
+
     [HttpGet("{id:guid}/scale")]
     public async Task<ActionResult<ApiResponse<RecipeScaleResultDto>>> Scale(Guid id, [FromQuery] int portions, CancellationToken ct)
     {

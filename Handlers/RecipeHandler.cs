@@ -164,6 +164,23 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>Hard delete — only allowed while the recipe was never actually used anywhere
+    /// (MealPlanItem/OrderItem/RouteStopItem/ProductionPlanItem all hold a Restrict FK to Recipe, so a
+    /// used recipe can't be removed without losing that history). Once it's been used even once,
+    /// ArchiveAsync is the only option — this mirrors why Archive existed in the first place.</summary>
+    public async Task DeleteAsync(Guid id, CancellationToken ct = default)
+    {
+        var recipe = await db.Recipes.FirstOrDefaultAsync(r => r.Id == id, ct) ?? throw new NotFoundException(nameof(Recipe), id);
+        var inUse = await db.MealPlanItems.AnyAsync(i => i.RecipeId == id, ct)
+            || await db.OrderItems.AnyAsync(i => i.RecipeId == id, ct)
+            || await db.RouteStopItems.AnyAsync(i => i.RecipeId == id, ct)
+            || await db.ProductionPlanItems.AnyAsync(i => i.RecipeId == id, ct);
+        if (inUse) throw new ConflictException("Rezept wird bereits verwendet (Wochenplan, Bestellung, Route oder Produktion) und kann daher nicht gelöscht werden — bitte stattdessen archivieren.");
+
+        db.Recipes.Remove(recipe);
+        await db.SaveChangesAsync(ct);
+    }
+
     // ---- Rezeptrechner import (recipes + the ingredients they reference) ----
     //
     // Real export sample confirmed the two files' shape (see RezeptrechnerCsvParser). The third

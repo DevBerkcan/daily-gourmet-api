@@ -118,6 +118,20 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>Hard delete — only allowed while the ingredient was never actually used anywhere
+    /// (RecipeIngredient/ProcurementListItem both hold a Restrict FK to Ingredient). Once it's been
+    /// used even once, DeactivateAsync is the only option.</summary>
+    public async Task DeleteAsync(Guid id, CancellationToken ct = default)
+    {
+        var ingredient = await db.Ingredients.FirstOrDefaultAsync(i => i.Id == id, ct) ?? throw new NotFoundException(nameof(Ingredient), id);
+        var inUse = await db.RecipeIngredients.AnyAsync(ri => ri.IngredientId == id, ct)
+            || await db.ProcurementListItems.AnyAsync(pi => pi.IngredientId == id, ct);
+        if (inUse) throw new ConflictException("Zutat wird bereits verwendet (Rezeptur oder Beschaffungsliste) und kann daher nicht gelöscht werden — bitte stattdessen deaktivieren.");
+
+        db.Ingredients.Remove(ingredient);
+        await db.SaveChangesAsync(ct);
+    }
+
     private async Task SaveOrConflictAsync(CancellationToken ct)
     {
         try
