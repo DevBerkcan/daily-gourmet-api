@@ -92,9 +92,10 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
         db.TenantSettings.Add(new TenantSettings { TenantId = tenant.Id });
 
         var token = Guid.NewGuid().ToString("N");
+        var username = await UserInvitationHelper.GenerateUniqueUsernameAsync(db, dto.MainContactEmail, ct);
         var user = new User
         {
-            Id = Guid.NewGuid(), TenantId = tenant.Id, Name = dto.MainContactName, Email = dto.MainContactEmail, PasswordHash = string.Empty,
+            Id = Guid.NewGuid(), TenantId = tenant.Id, Name = dto.MainContactName, Username = username, Email = dto.MainContactEmail, PasswordHash = string.Empty,
             Role = Role.TENANT_OWNER, Status = UserStatus.EINGELADEN, InvitationToken = token, InvitationExpiresAt = DateTime.UtcNow.AddHours(72), CreatedAt = DateTime.UtcNow,
         };
         db.Users.Add(user);
@@ -102,7 +103,9 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
 
         await SendInvitationEmailAsync(user, token);
 
-        return await ToTenantDtoAsync(tenant, ct);
+        var result = await ToTenantDtoAsync(tenant, ct);
+        result.OwnerInviteLink = UserInvitationHelper.BuildAcceptInviteUrl(appOptions.Value.PublicBaseUrl, token);
+        return result;
     }
 
     public async Task<TenantDto> UpdateTenantAsync(Guid id, UpdateTenantDto dto, CancellationToken ct = default)
@@ -180,13 +183,14 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
         }
 
         var emailNormalized = dto.Email.Trim();
-        var emailExists = await db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == emailNormalized, ct);
-        if (emailExists) throw new ConflictException("Diese E-Mail-Adresse wird bereits verwendet.");
+        var username = NormalizeUsername(dto.Username);
+        if (await db.Users.IgnoreQueryFilters().AnyAsync(u => u.Username == username, ct))
+            throw new ConflictException("Dieser Benutzername wird bereits verwendet.");
 
         var token = Guid.NewGuid().ToString("N");
         var user = new User
         {
-            Id = Guid.NewGuid(), TenantId = tenantId, FacilityId = facilityId, Name = dto.Name.Trim(), Email = emailNormalized,
+            Id = Guid.NewGuid(), TenantId = tenantId, FacilityId = facilityId, Name = dto.Name.Trim(), Username = username, Email = emailNormalized,
             PasswordHash = string.Empty, Role = role, Status = UserStatus.EINGELADEN,
             InvitationToken = token, InvitationExpiresAt = DateTime.UtcNow.AddHours(72), CreatedAt = DateTime.UtcNow,
         };
@@ -198,7 +202,20 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
         string? facilityName = facilityId is { } fidResult
             ? await db.Facilities.IgnoreQueryFilters().Where(f => f.Id == fidResult).Select(f => f.Name).FirstOrDefaultAsync(ct)
             : null;
-        return ToUserDto(user, tenant?.Name, facilityName);
+        var result = ToUserDto(user, tenant?.Name, facilityName);
+        result.InviteLink = UserInvitationHelper.BuildAcceptInviteUrl(appOptions.Value.PublicBaseUrl, token);
+        return result;
+    }
+
+    /// <summary>Same validation rule as UserManagementHandler's private copy — kept duplicated
+    /// rather than shared since these are the only two places an admin types a username by hand
+    /// (everywhere else it's derived via UserInvitationHelper.GenerateUniqueUsernameAsync).</summary>
+    private static string NormalizeUsername(string raw)
+    {
+        var trimmed = raw.Trim().ToLowerInvariant();
+        if (trimmed.Length < 3 || !trimmed.All(c => char.IsLetterOrDigit(c) || c is '.' or '_' or '-'))
+            throw new ValidationException("Benutzername muss mindestens 3 Zeichen lang sein und darf nur Kleinbuchstaben, Zahlen, Punkt, Unterstrich oder Bindestrich enthalten.");
+        return trimmed;
     }
 
     public async Task<UserDto> UpdateUserAsync(Guid id, SuperAdminUpdateUserDto dto, CancellationToken ct = default)
@@ -269,13 +286,14 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
     /// AuthHandler.AcceptInvitationAsync already sets a new password for a user found by a valid
     /// token regardless of their current Status, so no separate "forgot password" flow is needed:
     /// regenerating the token and re-sending the link is the whole reset.</summary>
-    public async Task TriggerPasswordResetAsync(Guid id, CancellationToken ct = default)
+    public async Task<string> TriggerPasswordResetAsync(Guid id, CancellationToken ct = default)
     {
         var user = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == id, ct) ?? throw new NotFoundException(nameof(User), id);
         user.InvitationToken = Guid.NewGuid().ToString("N");
         user.InvitationExpiresAt = DateTime.UtcNow.AddHours(72);
         await db.SaveChangesAsync(ct);
         await SendPasswordResetEmailAsync(user);
+        return UserInvitationHelper.BuildAcceptInviteUrl(appOptions.Value.PublicBaseUrl, user.InvitationToken);
     }
 
     private async Task SendPasswordResetEmailAsync(User user)
@@ -375,6 +393,6 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
     private static UserDto ToUserDto(User u, string? tenantName, string? facilityName) => new()
     {
         Id = u.Id, TenantId = u.TenantId, TenantName = tenantName, FacilityId = u.FacilityId, FacilityName = facilityName,
-        Name = u.Name, Email = u.Email, Role = u.Role.ToString(), Status = u.Status.ToString(), LastLoginAt = u.LastLoginAt, FailedLoginCount = u.FailedLoginCount,
+        Name = u.Name, Username = u.Username, Email = u.Email, Role = u.Role.ToString(), Status = u.Status.ToString(), LastLoginAt = u.LastLoginAt, FailedLoginCount = u.FailedLoginCount,
     };
 }

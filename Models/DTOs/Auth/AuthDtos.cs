@@ -4,8 +4,8 @@ namespace DailyGourmet.Api.Models.DTOs.Auth;
 
 public class LoginRequestDto
 {
-    [Required, EmailAddress]
-    public string Email { get; set; } = string.Empty;
+    [Required]
+    public string Username { get; set; } = string.Empty;
 
     [Required]
     public string Password { get; set; } = string.Empty;
@@ -25,6 +25,7 @@ public class CurrentUserDto
     public Guid? FacilityId { get; set; }
     public string? FacilityName { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string Username { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
     public bool ActiveSupportSession { get; set; }
@@ -43,6 +44,7 @@ public class CurrentUserDto
 public class InvitationDetailsDto
 {
     public string Name { get; set; } = string.Empty;
+    public string Username { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
 }
 
@@ -50,4 +52,13 @@ public class AcceptInvitationDto
 {
     [Required, MinLength(8, ErrorMessage = "Das Passwort muss mindestens 8 Zeichen lang sein.")]
     public string Password { get; set; } = string.Empty;
+}
+
+/// <summary>Returned wherever an admin action (re)generates a "set your password" link, so the
+/// caller can copy and manually share it (e.g. over chat) instead of relying only on email
+/// delivery — see AppOptions.PublicBaseUrl and the various SendXInviteEmailAsync methods, which
+/// still attempt to email it too, best-effort.</summary>
+public class InviteLinkDto
+{
+    public string Link { get; set; } = string.Empty;
 }

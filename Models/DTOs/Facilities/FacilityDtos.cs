@@ -25,6 +25,10 @@ public class FacilityDto
     /// <summary>True only on the response to a Create call that actually sent a FACILITY_ADMIN
     /// invite for this facility's Email — lets the frontend show a richer confirmation message.</summary>
     public bool AdminInvited { get; set; }
+    /// <summary>Set alongside AdminInvited — the auto-generated login username and "set your
+    /// password" link, to copy and share manually (see InviteLinkDto).</summary>
+    public string? AdminUsername { get; set; }
+    public string? AdminInviteLink { get; set; }
 }
 
 public class CreateFacilityDto

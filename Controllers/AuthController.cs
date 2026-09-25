@@ -14,7 +14,7 @@ public class AuthController(AuthHandler handler) : ControllerBase
     [AllowAnonymous]
     public async Task<ActionResult<ApiResponse<LoginResponseDto>>> Login([FromBody] LoginRequestDto request, CancellationToken ct)
     {
-        var result = await handler.LoginAsync(request.Email, request.Password, ct);
+        var result = await handler.LoginAsync(request.Username, request.Password, ct);
         return Ok(ApiResponse<LoginResponseDto>.Ok(result));
     }
 

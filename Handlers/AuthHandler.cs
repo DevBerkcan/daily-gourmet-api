@@ -22,10 +22,10 @@ public class AuthHandler(
     private const int MaxFailedAttempts = 5;
     private static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
 
-    public async Task<LoginResponseDto> LoginAsync(string email, string password, CancellationToken ct = default)
+    public async Task<LoginResponseDto> LoginAsync(string username, string password, CancellationToken ct = default)
     {
-        var user = await users.GetByEmailIgnoringTenantAsync(email, ct)
-            ?? throw new UnauthorizedException("E-Mail oder Passwort ist falsch.");
+        var user = await users.GetByUsernameIgnoringTenantAsync(username.Trim().ToLowerInvariant(), ct)
+            ?? throw new UnauthorizedException("Benutzername oder Passwort ist falsch.");
 
         if (user.Status != UserStatus.AKTIV)
             throw new UnauthorizedException("Dieses Konto ist nicht aktiv.");
@@ -40,7 +40,7 @@ public class AuthHandler(
             if (user.FailedLoginCount >= MaxFailedAttempts)
                 user.LockedUntil = DateTime.UtcNow.Add(LockoutDuration);
             await db.SaveChangesAsync(ct);
-            throw new UnauthorizedException("E-Mail oder Passwort ist falsch.");
+            throw new UnauthorizedException("Benutzername oder Passwort ist falsch.");
         }
 
         user.FailedLoginCount = 0;
@@ -88,7 +88,7 @@ public class AuthHandler(
     public async Task<InvitationDetailsDto> GetInvitationAsync(string token, CancellationToken ct = default)
     {
         var user = await FindByValidInvitationTokenAsync(token, ct);
-        return new InvitationDetailsDto { Name = user.Name, Email = user.Email };
+        return new InvitationDetailsDto { Name = user.Name, Username = user.Username, Email = user.Email };
     }
 
     /// <summary>Sets the initial (or reset) password for an invited user and activates the account.
@@ -144,6 +144,7 @@ public class AuthHandler(
             FacilityId = user.FacilityId,
             FacilityName = facilityName,
             Name = user.Name,
+            Username = user.Username,
             Email = user.Email,
             Role = user.Role.ToString(),
             ActiveSupportSession = activeSession,

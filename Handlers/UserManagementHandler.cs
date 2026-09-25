@@ -1,4 +1,5 @@
 using DailyGourmet.Api.Authentication;
+using DailyGourmet.Api.Data;
 using DailyGourmet.Api.Helpers;
 using DailyGourmet.Api.Models.DTOs;
 using DailyGourmet.Api.Models.DTOs.Users;
@@ -12,7 +13,7 @@ using Microsoft.Extensions.Options;
 
 namespace DailyGourmet.Api.Handlers;
 
-public class UserManagementHandler(IRepository<User> users, ITenantContext tenantContext, IEmailService email, IOptions<AppOptions> appOptions)
+public class UserManagementHandler(IRepository<User> users, ITenantContext tenantContext, IEmailService email, IOptions<AppOptions> appOptions, DailyGourmetDbContext db)
 {
     public async Task<PagedResult<UserDto>> ListAsync(int page, int pageSize, CancellationToken ct = default)
     {
@@ -43,9 +44,13 @@ public class UserManagementHandler(IRepository<User> users, ITenantContext tenan
             facilityId = tenantContext.FacilityId ?? throw new ForbiddenException("Kein Einrichtungskontext vorhanden.");
         }
 
+        var username = NormalizeUsername(dto.Username);
+        if (await db.Users.IgnoreQueryFilters().AnyAsync(u => u.Username == username, ct))
+            throw new ConflictException("Dieser Benutzername wird bereits verwendet.");
+
         var user = new User
         {
-            Id = Guid.NewGuid(), TenantId = tenantContext.TenantId!.Value, FacilityId = facilityId, Name = dto.Name.Trim(), Email = dto.Email.Trim(),
+            Id = Guid.NewGuid(), TenantId = tenantContext.TenantId!.Value, FacilityId = facilityId, Name = dto.Name.Trim(), Username = username, Email = dto.Email.Trim(),
             PasswordHash = string.Empty, Role = role, Status = UserStatus.EINGELADEN,
             InvitationToken = Guid.NewGuid().ToString("N"), InvitationExpiresAt = DateTime.UtcNow.AddHours(72),
         };
@@ -53,7 +58,21 @@ public class UserManagementHandler(IRepository<User> users, ITenantContext tenan
         await users.SaveChangesAsync(ct);
 
         await SendInviteEmailAsync(user);
-        return await GetByIdAsync(user.Id, ct);
+        var result = await GetByIdAsync(user.Id, ct);
+        result.InviteLink = UserInvitationHelper.BuildAcceptInviteUrl(appOptions.Value.PublicBaseUrl, user.InvitationToken);
+        return result;
+    }
+
+    /// <summary>Lowercased, restricted to letters/digits/.-_ — same rule as
+    /// UserInvitationHelper.GenerateUniqueUsernameAsync, but here the admin typed it explicitly
+    /// rather than it being derived, so an out-of-range character is a validation error rather than
+    /// something to silently strip.</summary>
+    private static string NormalizeUsername(string raw)
+    {
+        var trimmed = raw.Trim().ToLowerInvariant();
+        if (trimmed.Length < 3 || !trimmed.All(c => char.IsLetterOrDigit(c) || c is '.' or '_' or '-'))
+            throw new ValidationException("Benutzername muss mindestens 3 Zeichen lang sein und darf nur Kleinbuchstaben, Zahlen, Punkt, Unterstrich oder Bindestrich enthalten.");
+        return trimmed;
     }
 
     public async Task<UserDto> UpdateAsync(Guid id, UpdateUserDto dto, CancellationToken ct = default)
@@ -85,7 +104,7 @@ public class UserManagementHandler(IRepository<User> users, ITenantContext tenan
         await users.SaveChangesAsync(ct);
     }
 
-    public async Task ResendInvitationAsync(Guid id, CancellationToken ct = default)
+    public async Task<string> ResendInvitationAsync(Guid id, CancellationToken ct = default)
     {
         var user = await users.GetByIdAsync(id, ct) ?? throw new NotFoundException(nameof(User), id);
         user.InvitationToken = Guid.NewGuid().ToString("N");
@@ -93,6 +112,7 @@ public class UserManagementHandler(IRepository<User> users, ITenantContext tenan
         users.Update(user);
         await users.SaveChangesAsync(ct);
         await SendInviteEmailAsync(user);
+        return UserInvitationHelper.BuildAcceptInviteUrl(appOptions.Value.PublicBaseUrl, user.InvitationToken);
     }
 
     private async Task SendInviteEmailAsync(User user)
@@ -111,6 +131,6 @@ public class UserManagementHandler(IRepository<User> users, ITenantContext tenan
     private static UserDto ToDto(User u) => new()
     {
         Id = u.Id, TenantId = u.TenantId, FacilityId = u.FacilityId, FacilityName = u.Facility?.Name,
-        Name = u.Name, Email = u.Email, Role = u.Role.ToString(), Status = u.Status.ToString(), LastLoginAt = u.LastLoginAt, FailedLoginCount = u.FailedLoginCount,
+        Name = u.Name, Username = u.Username, Email = u.Email, Role = u.Role.ToString(), Status = u.Status.ToString(), LastLoginAt = u.LastLoginAt, FailedLoginCount = u.FailedLoginCount,
     };
 }

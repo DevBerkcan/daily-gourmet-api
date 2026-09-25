@@ -175,15 +175,15 @@ public static class DbSeeder
         }
 
         // ---- Users (one per role + a facility-linked pair) ----
-        var users = new (Guid Id, string Name, string Email, Role Role, UserStatus Status, Guid? FacilityId)[]
+        var users = new (Guid Id, string Name, string Username, string Email, Role Role, UserStatus Status, Guid? FacilityId)[]
         {
-            (G("U1"), "Berk-Can Aydin", "berkcan@gentle-webdesign.com", Role.SUPER_ADMIN, UserStatus.AKTIV, null),
-            (G("U2"), "Miriam Hoffmann", "miriam.hoffmann@daily-gourmet.de", Role.TENANT_OWNER, UserStatus.AKTIV, null),
-            (G("U3"), "Jonas Weber", "jonas.weber@daily-gourmet.de", Role.TENANT_ADMIN, UserStatus.AKTIV, null),
-            (G("U6"), "Claudia Winter", "claudia.winter@musterschule-nord.example.de", Role.FACILITY_ADMIN, UserStatus.AKTIV, facilityData[0].Id),
-            (G("U7"), "Sven Fischer", "sven.fischer@musterschule-nord.example.de", Role.FACILITY_USER, UserStatus.EINGELADEN, facilityData[0].Id),
-            (G("U8"), "Lena Roth", "lena.roth@daily-gourmet.de", Role.READ_ONLY, UserStatus.DEAKTIVIERT, null),
-            (G("U9"), "Markus Becker", "markus.becker@daily-gourmet.de", Role.DRIVER, UserStatus.AKTIV, null),
+            (G("U1"), "Berk-Can Aydin", "berkcan", "berkcan@gentle-webdesign.com", Role.SUPER_ADMIN, UserStatus.AKTIV, null),
+            (G("U2"), "Miriam Hoffmann", "miriam.hoffmann", "miriam.hoffmann@daily-gourmet.de", Role.TENANT_OWNER, UserStatus.AKTIV, null),
+            (G("U3"), "Jonas Weber", "jonas.weber", "jonas.weber@daily-gourmet.de", Role.TENANT_ADMIN, UserStatus.AKTIV, null),
+            (G("U6"), "Claudia Winter", "claudia.winter", "claudia.winter@musterschule-nord.example.de", Role.FACILITY_ADMIN, UserStatus.AKTIV, facilityData[0].Id),
+            (G("U7"), "Sven Fischer", "sven.fischer", "sven.fischer@musterschule-nord.example.de", Role.FACILITY_USER, UserStatus.EINGELADEN, facilityData[0].Id),
+            (G("U8"), "Lena Roth", "lena.roth", "lena.roth@daily-gourmet.de", Role.READ_ONLY, UserStatus.DEAKTIVIERT, null),
+            (G("U9"), "Markus Becker", "markus.becker", "markus.becker@daily-gourmet.de", Role.DRIVER, UserStatus.AKTIV, null),
         };
         foreach (var u in users)
         {
@@ -193,6 +193,7 @@ public static class DbSeeder
                 TenantId = u.Role == Role.SUPER_ADMIN ? null : tenantId,
                 FacilityId = u.FacilityId,
                 Name = u.Name,
+                Username = u.Username,
                 Email = u.Email,
                 Role = u.Role,
                 Status = u.Status,

@@ -7,8 +7,8 @@ namespace DailyGourmet.Api.Repositories.Implementations;
 
 public class UserRepository(DailyGourmetDbContext db) : Repository<User>(db), IUserRepository
 {
-    public Task<User?> GetByEmailIgnoringTenantAsync(string email, CancellationToken ct = default) =>
-        Set.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == email, ct);
+    public Task<User?> GetByUsernameIgnoringTenantAsync(string username, CancellationToken ct = default) =>
+        Set.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Username == username, ct);
 
     public Task<User?> GetByIdIgnoringTenantAsync(Guid id, CancellationToken ct = default) =>
         Set.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == id, ct);

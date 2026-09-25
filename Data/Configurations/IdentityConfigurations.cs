@@ -86,8 +86,9 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
     public void Configure(EntityTypeBuilder<User> b)
     {
         b.Property(u => u.Name).HasMaxLength(200).IsRequired();
+        b.Property(u => u.Username).HasMaxLength(64).IsRequired();
+        b.HasIndex(u => u.Username).IsUnique();
         b.Property(u => u.Email).HasMaxLength(256).IsRequired();
-        b.HasIndex(u => u.Email).IsUnique();
         b.Property(u => u.PasswordHash).IsRequired();
         b.Property(u => u.Role).HasConversion<string>().HasMaxLength(20);
         b.Property(u => u.Status).HasConversion<string>().HasMaxLength(20);

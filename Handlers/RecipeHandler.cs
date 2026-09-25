@@ -14,7 +14,20 @@ namespace DailyGourmet.Api.Handlers;
 
 public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContext, IPdfService pdfService, IngredientHandler ingredientHandler)
 {
+    // AsSplitQuery(): this graph has many sibling/nested one-to-many Includes (PrepSteps,
+    // Ingredients→Allergens, Ingredients→Additives, Ingredients→SupplierPrices, AllergenOverrides,
+    // AdditiveOverrides, NutritionClaims, TargetGroups). As a single query, EF joins all of them
+    // together, so the row count is the *product* of each collection's size per recipe — a recipe
+    // with e.g. 15 ingredients (each with 2 allergens and 3 additives) × a handful of overrides/claims
+    // already balloons into thousands of duplicate rows for one logical recipe, and ListAsync (up to
+    // pageSize=500 recipes) pays that multiplication 500 times over. The frontend has no separate
+    // "detail" fetch — rezept-detail.tsx and several other components reuse this same list result via
+    // useRezepte() and filter client-side (see daily-gourmet/src/features/recipes/components/rezept-
+    // detail.tsx) — so every field ToDto reads (allergens, additives, nutrition claims, target groups,
+    // cost) is genuinely needed on every row returned here; the fix is to stop the cartesian
+    // multiplication (split into one query per collection), not to trim the projection.
     private static IQueryable<Recipe> FullQuery(DailyGourmetDbContext db) => db.Recipes
+        .AsSplitQuery()
         .Include(r => r.Category)
         .Include(r => r.CreatedByUser)
         .Include(r => r.PrepSteps)

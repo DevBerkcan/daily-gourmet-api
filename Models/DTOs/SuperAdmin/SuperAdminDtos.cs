@@ -8,6 +8,7 @@ namespace DailyGourmet.Api.Models.DTOs.SuperAdmin;
 public class CreateUserDto
 {
     [Required, MaxLength(200)] public string Name { get; set; } = string.Empty;
+    [Required, MaxLength(64)] public string Username { get; set; } = string.Empty;
     [Required, EmailAddress] public string Email { get; set; } = string.Empty;
     [Required] public string Role { get; set; } = string.Empty;
     public Guid? TenantId { get; set; }

@@ -12,6 +12,9 @@ public class TenantDto
     public DateTime CreatedAt { get; set; }
     public int UserCount { get; set; }
     public int FacilityCount { get; set; }
+    /// <summary>Set only on the response to CreateTenantAsync — the owner's "set your password"
+    /// link, to copy and share manually (see InviteLinkDto).</summary>
+    public string? OwnerInviteLink { get; set; }
 }
 
 public class CreateTenantDto

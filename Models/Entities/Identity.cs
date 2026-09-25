@@ -101,6 +101,9 @@ public class User : BaseEntity
     public Facility? Facility { get; set; }
 
     public string Name { get; set; } = null!;
+    /// <summary>The login identifier — globally unique, lowercase. Email is now just a contact
+    /// field (no longer unique, no longer used to log in) — see AuthHandler.LoginAsync.</summary>
+    public string Username { get; set; } = null!;
     public string Email { get; set; } = null!;
     public string PasswordHash { get; set; } = null!;
     public Role Role { get; set; }

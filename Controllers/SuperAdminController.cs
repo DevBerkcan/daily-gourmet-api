@@ -1,5 +1,6 @@
 using DailyGourmet.Api.Handlers;
 using DailyGourmet.Api.Models.DTOs;
+using DailyGourmet.Api.Models.DTOs.Auth;
 using DailyGourmet.Api.Models.DTOs.Facilities;
 using DailyGourmet.Api.Models.DTOs.SuperAdmin;
 using DailyGourmet.Api.Models.DTOs.Tenants;
@@ -108,10 +109,10 @@ public class SuperAdminController(SuperAdminHandler handler, AuditLogHandler aud
     }
 
     [HttpPost("users/{id:guid}/password-reset")]
-    public async Task<ActionResult<ApiResponse>> ResetUserPassword(Guid id, CancellationToken ct)
+    public async Task<ActionResult<ApiResponse<InviteLinkDto>>> ResetUserPassword(Guid id, CancellationToken ct)
     {
-        await handler.TriggerPasswordResetAsync(id, ct);
-        return Ok(ApiResponse.Ok());
+        var link = await handler.TriggerPasswordResetAsync(id, ct);
+        return Ok(ApiResponse<InviteLinkDto>.Ok(new InviteLinkDto { Link = link }));
     }
 
     [HttpDelete("users/{id:guid}")]

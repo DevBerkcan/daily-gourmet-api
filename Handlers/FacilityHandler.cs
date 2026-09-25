@@ -61,11 +61,6 @@ public class FacilityHandler(
 
         var email = dto.Email.Trim();
         var autoInviteEnabled = await featureFlags.IsEnabledAsync(tenantId, "facility-auto-invite", ct);
-        // Global uniqueness check (User.Email has a global unique index) — IgnoreQueryFilters()
-        // because the normal User query filter only shows this tenant's own users, and we must
-        // catch a collision with any tenant's account before it becomes a raw DB constraint error.
-        if (autoInviteEnabled && await db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == email, ct))
-            throw new ConflictException("Diese E-Mail-Adresse wird bereits für ein anderes Konto verwendet.");
 
         var settings = await tenantSettings.GetAsync(tenantId, ct);
         var prefix = settings?.FacilityNumberPrefix ?? "DG-1";
@@ -107,11 +102,14 @@ public class FacilityHandler(
         // facility-auto-invite flag so a tenant can opt out without a code change.
         if (autoInviteEnabled)
         {
-            var invitedAdmin = UserInvitationHelper.BuildInvitedUser(tenantId, facility.Id, dto.ContactPerson.Trim(), email, Role.FACILITY_ADMIN);
+            var username = await UserInvitationHelper.GenerateUniqueUsernameAsync(db, email, ct);
+            var invitedAdmin = UserInvitationHelper.BuildInvitedUser(tenantId, facility.Id, dto.ContactPerson.Trim(), username, email, Role.FACILITY_ADMIN);
             db.Users.Add(invitedAdmin);
             await db.SaveChangesAsync(ct);
             await SendFacilityInviteEmailAsync(invitedAdmin);
             result.AdminInvited = true;
+            result.AdminUsername = username;
+            result.AdminInviteLink = UserInvitationHelper.BuildAcceptInviteUrl(appOptions.Value.PublicBaseUrl, invitedAdmin.InvitationToken!);
         }
 
         return result;

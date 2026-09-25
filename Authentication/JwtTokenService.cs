@@ -12,6 +12,7 @@ namespace DailyGourmet.Api.Authentication;
 /// <summary>Claim keys shared between token generation and TenantContextMiddleware.</summary>
 public static class DgClaimTypes
 {
+    public const string Username = "username";
     public const string TenantId = "tenantId";
     public const string FacilityId = "facilityId";
     public const string IsImpersonation = "isImpersonation";
@@ -31,6 +32,7 @@ public class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenService
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new(DgClaimTypes.Username, user.Username),
             new(JwtRegisteredClaimNames.Email, user.Email),
             new(ClaimTypes.Name, user.Name),
             new(ClaimTypes.Role, user.Role.ToString()),
@@ -62,6 +64,7 @@ public class JwtTokenService(IOptions<JwtOptions> options) : IJwtTokenService
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, superAdmin.Id.ToString()),
+            new(DgClaimTypes.Username, superAdmin.Username),
             new(JwtRegisteredClaimNames.Email, superAdmin.Email),
             new(ClaimTypes.Name, superAdmin.Name),
             // Effective role while impersonating is TENANT_ADMIN — not SUPER_ADMIN — so this token

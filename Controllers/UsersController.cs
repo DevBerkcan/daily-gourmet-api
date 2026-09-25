@@ -1,5 +1,6 @@
 using DailyGourmet.Api.Handlers;
 using DailyGourmet.Api.Models.DTOs;
+using DailyGourmet.Api.Models.DTOs.Auth;
 using DailyGourmet.Api.Models.DTOs.Users;
 using DailyGourmet.Api.Models.Enums;
 using Microsoft.AspNetCore.Authorization;
@@ -50,9 +51,9 @@ public class UsersController(UserManagementHandler handler) : ControllerBase
 
     [HttpPost("{id:guid}/resend-invitation")]
     [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
-    public async Task<ActionResult<ApiResponse>> ResendInvitation(Guid id, CancellationToken ct)
+    public async Task<ActionResult<ApiResponse<InviteLinkDto>>> ResendInvitation(Guid id, CancellationToken ct)
     {
-        await handler.ResendInvitationAsync(id, ct);
-        return Ok(ApiResponse.Ok());
+        var link = await handler.ResendInvitationAsync(id, ct);
+        return Ok(ApiResponse<InviteLinkDto>.Ok(new InviteLinkDto { Link = link }));
     }
 }
