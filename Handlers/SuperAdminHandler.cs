@@ -99,6 +99,7 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
             Role = Role.TENANT_OWNER, Status = UserStatus.EINGELADEN, InvitationToken = token, InvitationExpiresAt = DateTime.UtcNow.AddHours(72), CreatedAt = DateTime.UtcNow,
         };
         db.Users.Add(user);
+        await DriverProfileHelper.EnsureForUserAsync(db, user, ct);
         await db.SaveChangesAsync(ct);
 
         await SendInvitationEmailAsync(user, token);
@@ -195,6 +196,7 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
             InvitationToken = token, InvitationExpiresAt = DateTime.UtcNow.AddHours(72), CreatedAt = DateTime.UtcNow,
         };
         db.Users.Add(user);
+        await DriverProfileHelper.EnsureForUserAsync(db, user, ct);
         await db.SaveChangesAsync(ct);
 
         await SendInvitationEmailAsync(user, token);
@@ -241,6 +243,7 @@ public class SuperAdminHandler(DailyGourmetDbContext db, ITenantContext tenantCo
         user.Role = role;
         user.FacilityId = dto.FacilityId;
         user.UpdatedAt = DateTime.UtcNow;
+        await DriverProfileHelper.EnsureForUserAsync(db, user, ct);
         await db.SaveChangesAsync(ct);
 
         string? facilityName = user.FacilityId is { } resultFid

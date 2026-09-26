@@ -143,6 +143,7 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<DailyGourmetDbContext>();
     await DbSeeder.EnsureFeatureFlagsExistAsync(db);
+    await DriverProfileHelper.BackfillMissingAsync(db);
 }
 
 app.UseMiddleware<ExceptionMiddleware>();

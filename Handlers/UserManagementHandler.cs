@@ -55,6 +55,7 @@ public class UserManagementHandler(IRepository<User> users, ITenantContext tenan
             InvitationToken = Guid.NewGuid().ToString("N"), InvitationExpiresAt = DateTime.UtcNow.AddHours(72),
         };
         await users.AddAsync(user, ct);
+        await DriverProfileHelper.EnsureForUserAsync(db, user, ct);
         await users.SaveChangesAsync(ct);
 
         await SendInviteEmailAsync(user);
@@ -92,6 +93,7 @@ public class UserManagementHandler(IRepository<User> users, ITenantContext tenan
 
         user.Name = dto.Name.Trim();
         users.Update(user);
+        await DriverProfileHelper.EnsureForUserAsync(db, user, ct);
         await users.SaveChangesAsync(ct);
         return await GetByIdAsync(id, ct);
     }
