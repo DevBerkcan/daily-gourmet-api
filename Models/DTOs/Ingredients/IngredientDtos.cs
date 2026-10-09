@@ -138,6 +138,7 @@ public class SaveIngredientDto
     public bool Vegan { get; set; }
     public bool Bio { get; set; }
     public bool Regional { get; set; }
+    public bool Active { get; set; } = true;
     public NutritionDto Nutrition { get; set; } = new();
     public Guid[] AllergenIds { get; set; } = [];
     public string[] Additives { get; set; } = [];
@@ -150,6 +151,8 @@ public class SupplierDto
     public string? ContactPerson { get; set; }
     public string? Phone { get; set; }
     public string? Email { get; set; }
+    /// <summary>How many ingredient prices this supplier's price list currently holds.</summary>
+    public int PriceCount { get; set; }
 }
 
 public class SaveSupplierDto

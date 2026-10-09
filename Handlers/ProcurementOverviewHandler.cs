@@ -3,6 +3,7 @@ using DailyGourmet.Api.Models.DTOs.Procurement;
 using DailyGourmet.Api.Models.DTOs.Production;
 using DailyGourmet.Api.Models.Entities;
 using DailyGourmet.Api.Models.Enums;
+using DailyGourmet.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace DailyGourmet.Api.Handlers;
@@ -40,7 +41,7 @@ public class ProcurementOverviewHandler(DailyGourmetDbContext db)
         var query = db.OrderItems.Where(oi => ConfirmedStatuses.Contains(oi.Order.Status) && oi.Order.MealPlan.Year == year && oi.Order.MealPlan.CalendarWeek == calendarWeek);
         if (locationId is { } lid) query = query.Where(oi => oi.Order.Facility.LocationId == lid);
 
-        return await query
+        var rows = await query
             .GroupBy(oi => new { oi.RecipeId, oi.Recipe.Name })
             .Select(g => new WeekRecipeRequirementDto
             {
@@ -51,6 +52,20 @@ public class ProcurementOverviewHandler(DailyGourmetDbContext db)
             })
             .OrderByDescending(r => r.TotalPortions)
             .ToListAsync(ct);
+
+        var recipeIds = rows.Select(r => r.RecipeId).ToList();
+        var recipes = await db.Recipes.AsSplitQuery()
+            .Where(r => recipeIds.Contains(r.Id))
+            .Include(r => r.Ingredients).ThenInclude(ri => ri.Ingredient).ThenInclude(i => i.SupplierPrices)
+            .ToDictionaryAsync(r => r.Id, ct);
+        foreach (var row in rows)
+        {
+            if (!recipes.TryGetValue(row.RecipeId, out var recipe)) continue;
+            row.CostPerPortion = RecipeHandler.EffectiveCostPerPortion(recipe);
+            row.CostIsManual = recipe.ManualCostPerPortion != null;
+            row.TotalCost = row.CostPerPortion is { } c ? decimal.Round(c * row.TotalPortions, 2, MidpointRounding.AwayFromZero) : null;
+        }
+        return rows;
     }
 
     /// <summary>Same scaling/aggregation as ProductionPlanHandler.RequirementsAsync, sourced from raw
@@ -59,7 +74,9 @@ public class ProcurementOverviewHandler(DailyGourmetDbContext db)
     {
         var query = db.OrderItems
             .Where(oi => ConfirmedStatuses.Contains(oi.Order.Status) && oi.Order.MealPlan.Year == year && oi.Order.MealPlan.CalendarWeek == calendarWeek)
+            .AsSplitQuery()
             .Include(oi => oi.Recipe).ThenInclude(r => r.Ingredients).ThenInclude(ri => ri.Ingredient).ThenInclude(i => i.Category).ThenInclude(c => c.DefaultStorageLocation)
+            .Include(oi => oi.Recipe).ThenInclude(r => r.Ingredients).ThenInclude(ri => ri.Ingredient).ThenInclude(i => i.SupplierPrices).ThenInclude(p => p.Supplier)
             .AsQueryable();
         if (locationId is { } lid) query = query.Where(oi => oi.Order.Facility.LocationId == lid);
 
@@ -86,15 +103,25 @@ public class ProcurementOverviewHandler(DailyGourmetDbContext db)
             }
         }
 
-        return aggregate.Select(kv => new IngredientRequirementDto
+        return aggregate.Select(kv =>
         {
-            IngredientId = kv.Key.IngredientId,
-            IngredientName = kv.Value.Ingredient.Name,
-            CategoryName = kv.Value.Ingredient.Category?.Name ?? string.Empty,
-            Unit = kv.Key.Unit.ToString(),
-            TotalQuantity = decimal.Round(kv.Value.Total, 2, MidpointRounding.AwayFromZero),
-            StorageLocationName = kv.Value.Ingredient.Category?.DefaultStorageLocation?.Name,
-            ContributingRecipeNames = kv.Value.Recipes.ToArray(),
+            var ingredient = kv.Value.Ingredient;
+            var price = IngredientPricing.Resolve(ingredient);
+            var cost = IngredientPricing.Cost(ingredient, kv.Value.Total, kv.Key.Unit);
+            return new IngredientRequirementDto
+            {
+                IngredientId = kv.Key.IngredientId,
+                IngredientName = ingredient.Name,
+                CategoryName = ingredient.Category?.Name ?? string.Empty,
+                Unit = kv.Key.Unit.ToString(),
+                TotalQuantity = decimal.Round(kv.Value.Total, 2, MidpointRounding.AwayFromZero),
+                StorageLocationName = ingredient.Category?.DefaultStorageLocation?.Name,
+                ContributingRecipeNames = kv.Value.Recipes.ToArray(),
+                UnitPrice = price is { } p ? decimal.Round(p.Price, 4, MidpointRounding.AwayFromZero) : null,
+                PriceUnit = price?.Unit.ToString(),
+                SupplierName = price?.SupplierName,
+                TotalCost = cost is { } c ? decimal.Round(c, 2, MidpointRounding.AwayFromZero) : null,
+            };
         }).OrderBy(r => r.StorageLocationName).ThenBy(r => r.IngredientName).ToList();
     }
 }

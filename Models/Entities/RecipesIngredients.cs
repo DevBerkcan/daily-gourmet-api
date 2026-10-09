@@ -169,6 +169,12 @@ public class Recipe : BaseEntity, ITenantScoped
     /// bekannter Unterschied). Treibt "Gewicht zubereitet" in der Nährwerte-Detailansicht.</summary>
     public decimal ReductionFactor { get; set; } = 1m;
 
+    /// <summary>Manuell gepflegter Preis je Portion (Wareneinsatz). Wenn gesetzt, hat er Vorrang vor
+    /// dem aus den Zutatenpreisen live berechneten Schätzwert (RecipeHandler.ComputeEstimatedCostPerPortion)
+    /// — für Rezepte, deren Zutaten (noch) keine Preise haben, oder wenn die Küche einen festen
+    /// Kalkulationspreis vorgibt. Null = nur Live-Berechnung. Wird von keinem Import überschrieben.</summary>
+    public decimal? ManualCostPerPortion { get; set; }
+
     /// <summary>Authoritative import values (nullable) — override live-computed values when present.</summary>
     public RecipeNutrition? Nutrition { get; set; }
     public NutriScore? NutriScore { get; set; }

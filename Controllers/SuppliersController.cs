@@ -41,6 +41,23 @@ public class SuppliersController(SupplierHandler handler) : ControllerBase
         return Ok(ApiResponse<SupplierDto>.Ok(result));
     }
 
+    [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse>> Delete(Guid id, CancellationToken ct)
+    {
+        await handler.DeleteAsync(id, ct);
+        return Ok(ApiResponse.Ok());
+    }
+
+    /// <summary>Empties the supplier's price list (all its ingredient prices) without deleting it.</summary>
+    [HttpDelete("{id:guid}/prices")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse<int>>> ClearPrices(Guid id, CancellationToken ct)
+    {
+        var removed = await handler.ClearPricesAsync(id, ct);
+        return Ok(ApiResponse<int>.Ok(removed));
+    }
+
     [HttpPost("{id:guid}/price-import")]
     [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     [RequestSizeLimit(10_000_000)]

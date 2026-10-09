@@ -61,7 +61,7 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
             Vegan = dto.Vegan,
             Bio = dto.Bio,
             Regional = dto.Regional,
-            Active = true,
+            Active = dto.Active,
             Source = IngredientSource.Manuell,
             Nutrition = ToEntityNutrition(dto.Nutrition),
         };
@@ -92,6 +92,7 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
         ingredient.Vegan = dto.Vegan;
         ingredient.Bio = dto.Bio;
         ingredient.Regional = dto.Regional;
+        ingredient.Active = dto.Active;
         ingredient.Nutrition = ToEntityNutrition(dto.Nutrition);
         // A human just edited this ingredient — protect it from a future Rezeptrechner sync ever
         // overwriting these changes again, regardless of where the row originally came from.

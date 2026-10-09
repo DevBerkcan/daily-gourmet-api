@@ -23,11 +23,20 @@ public class SupplierHandler(IRepository<Supplier> suppliers, DailyGourmetDbCont
             query = query.Where(s => s.Name.Contains(search));
         var total = await query.CountAsync(ct);
         var items = await query.OrderBy(s => s.Name).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
-        return new PagedResult<SupplierDto> { Items = items.Select(ToDto).ToList(), Total = total, Page = page, PageSize = pageSize };
+        var ids = items.Select(s => s.Id).ToList();
+        var priceCounts = await db.IngredientSupplierPrices.Where(p => ids.Contains(p.SupplierId))
+            .GroupBy(p => p.SupplierId).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+        return new PagedResult<SupplierDto>
+        {
+            Items = items.Select(s => ToDto(s, priceCounts.GetValueOrDefault(s.Id))).ToList(), Total = total, Page = page, PageSize = pageSize,
+        };
     }
 
-    public async Task<SupplierDto> GetByIdAsync(Guid id, CancellationToken ct = default) =>
-        ToDto(await suppliers.GetByIdAsync(id, ct) ?? throw new NotFoundException(nameof(Supplier), id));
+    public async Task<SupplierDto> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var supplier = await suppliers.GetByIdAsync(id, ct) ?? throw new NotFoundException(nameof(Supplier), id);
+        return ToDto(supplier, await db.IngredientSupplierPrices.CountAsync(p => p.SupplierId == id, ct));
+    }
 
     public async Task<SupplierDto> CreateAsync(SaveSupplierDto dto, CancellationToken ct = default)
     {
@@ -50,10 +59,38 @@ public class SupplierHandler(IRepository<Supplier> suppliers, DailyGourmetDbCont
         supplier.Email = dto.Email;
         suppliers.Update(supplier);
         await suppliers.SaveChangesAsync(ct);
-        return ToDto(supplier);
+        return await GetByIdAsync(id, ct);
     }
 
-    private static SupplierDto ToDto(Supplier s) => new() { Id = s.Id, Name = s.Name, ContactPerson = s.ContactPerson, Phone = s.Phone, Email = s.Email };
+    /// <summary>Removes the supplier together with its whole price list; ingredients that named it
+    /// as their supplier keep existing with no supplier. Blocked while an Einkaufsliste still belongs
+    /// to it (ProcurementList.SupplierId is a Restrict FK) — those lists are the order history for
+    /// that supplier, so they must not silently lose who they were ordered from.</summary>
+    public async Task DeleteAsync(Guid id, CancellationToken ct = default)
+    {
+        var supplier = await suppliers.GetByIdAsync(id, ct) ?? throw new NotFoundException(nameof(Supplier), id);
+        if (await db.ProcurementLists.AnyAsync(l => l.SupplierId == id, ct))
+            throw new ConflictException("Für diesen Lieferanten existieren bereits Einkaufslisten — er kann daher nicht gelöscht werden. Die Preisliste lässt sich aber leeren.");
+
+        db.IngredientSupplierPrices.RemoveRange(await db.IngredientSupplierPrices.Where(p => p.SupplierId == id).ToListAsync(ct));
+        foreach (var ingredient in await db.Ingredients.Where(i => i.SupplierId == id).ToListAsync(ct))
+            ingredient.SupplierId = null;
+        db.Suppliers.Remove(supplier);
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Deletes every price this supplier has on record (its imported/maintained price list),
+    /// keeping the supplier itself. Returns how many prices were removed.</summary>
+    public async Task<int> ClearPricesAsync(Guid id, CancellationToken ct = default)
+    {
+        if (!await suppliers.Query().AnyAsync(s => s.Id == id, ct)) throw new NotFoundException(nameof(Supplier), id);
+        var prices = await db.IngredientSupplierPrices.Where(p => p.SupplierId == id).ToListAsync(ct);
+        db.IngredientSupplierPrices.RemoveRange(prices);
+        await db.SaveChangesAsync(ct);
+        return prices.Count;
+    }
+
+    private static SupplierDto ToDto(Supplier s, int priceCount = 0) => new() { Id = s.Id, Name = s.Name, ContactPerson = s.ContactPerson, Phone = s.Phone, Email = s.Email, PriceCount = priceCount };
 
     // ---- Supplier price-list import (CSV/XLSX) ----
     //

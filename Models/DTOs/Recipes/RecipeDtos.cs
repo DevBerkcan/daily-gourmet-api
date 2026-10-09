@@ -52,9 +52,13 @@ public class RecipeDto
     public bool GlutenFree { get; set; }
     public bool LactoseFree { get; set; }
     public bool DgeCertified { get; set; }
+    /// <summary>Effective cost per portion: ManualCostPerPortion when set, else
+    /// ComputedCostPerPortion. Null when neither is available.</summary>
+    public decimal? EstimatedCostPerPortion { get; set; }
     /// <summary>Computed, not stored — see RecipeHandler.ComputeEstimatedCostPerPortion. Null when
     /// no ingredient price (supplier or standard) is available yet to base an estimate on.</summary>
-    public decimal? EstimatedCostPerPortion { get; set; }
+    public decimal? ComputedCostPerPortion { get; set; }
+    public decimal? ManualCostPerPortion { get; set; }
     public RecipeNutritionDto? Nutrition { get; set; }
     public string? ProductionNotes { get; set; }
     public string? ImageUrl { get; set; }
@@ -110,6 +114,7 @@ public class SaveRecipeDto
     public string? StorageNote { get; set; }
     public string? ShelfLifeAfterPrep { get; set; }
     [Range(0.01, 3)] public decimal ReductionFactor { get; set; } = 1;
+    [Range(0, 100000)] public decimal? ManualCostPerPortion { get; set; }
     public string[] PrepSteps { get; set; } = [];
     public List<SaveRecipeIngredientDto> Ingredients { get; set; } = [];
     public Guid[] TargetGroupIds { get; set; } = [];

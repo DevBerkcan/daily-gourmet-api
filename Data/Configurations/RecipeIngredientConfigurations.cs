@@ -131,6 +131,7 @@ public class RecipeConfiguration : IEntityTypeConfiguration<Recipe>
         b.Property(r => r.NutriScore).HasConversion<string>().HasMaxLength(1);
         b.Property(r => r.NutriScoreCategory).HasMaxLength(100);
         b.Property(r => r.ReductionFactor).HasPrecision(6, 3).HasDefaultValue(1m);
+        b.Property(r => r.ManualCostPerPortion).HasPrecision(10, 2);
 
         b.OwnsOne(r => r.Nutrition, n =>
         {

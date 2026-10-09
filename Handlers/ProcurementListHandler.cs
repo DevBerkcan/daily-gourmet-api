@@ -20,10 +20,12 @@ public class ProcurementListHandler(DailyGourmetDbContext db, ITenantContext ten
     private static readonly string[] StatusOrder = ["DRAFT", "REVIEWED", "READY_FOR_APPROVAL", "APPROVED", "ORDERED", "COMPLETED"];
 
     private static IQueryable<ProcurementList> FullQuery(DailyGourmetDbContext db) => db.ProcurementLists
+        .AsSplitQuery()
         .Include(l => l.Location)
         .Include(l => l.Supplier)
         .Include(l => l.Items).ThenInclude(i => i.Ingredient).ThenInclude(i => i.Category)
-        .Include(l => l.Items).ThenInclude(i => i.Ingredient).ThenInclude(i => i.Supplier);
+        .Include(l => l.Items).ThenInclude(i => i.Ingredient).ThenInclude(i => i.Supplier)
+        .Include(l => l.Items).ThenInclude(i => i.Ingredient).ThenInclude(i => i.SupplierPrices);
 
     public async Task<PagedResult<ProcurementListDto>> ListAsync(Guid? locationId, int? calendarWeek, string? status, int page, int pageSize, CancellationToken ct = default)
     {
@@ -197,9 +199,13 @@ public class ProcurementListHandler(DailyGourmetDbContext db, ITenantContext ten
     {
         var list = await FullQuery(db).FirstOrDefaultAsync(l => l.Id == id, ct) ?? throw new NotFoundException(nameof(ProcurementList), id);
         var sb = new StringBuilder();
-        sb.AppendLine("Artikelnummer;Zutat;Bedarf;Einheit;Bestellmenge;Lieferant");
+        sb.AppendLine("Artikelnummer;Zutat;Bedarf;Einheit;Bestellmenge;Lieferant;Preis");
         foreach (var item in list.Items)
-            sb.AppendLine($"{item.Ingredient.ArticleNumber};{item.Ingredient.Name};{item.TotalQuantityBase};{item.Unit};{item.PurchaseQuantity};{item.Ingredient.Supplier?.Name}");
+        {
+            var (_, perPurchaseUnit) = PriceItem(item, list.SupplierId);
+            var cost = perPurchaseUnit is { } c ? decimal.Round(c * item.PurchaseQuantity, 2, MidpointRounding.AwayFromZero).ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
+            sb.AppendLine($"{item.Ingredient.ArticleNumber};{item.Ingredient.Name};{item.TotalQuantityBase};{item.Unit};{item.PurchaseQuantity};{item.Ingredient.Supplier?.Name};{cost}");
+        }
         return Encoding.UTF8.GetBytes(sb.ToString());
     }
 
@@ -218,11 +224,30 @@ public class ProcurementListHandler(DailyGourmetDbContext db, ITenantContext ten
     {
         Id = l.Id, Label = l.Label, CalendarWeek = l.CalendarWeek, LocationId = l.LocationId, LocationName = l.Location?.Name ?? string.Empty,
         SupplierId = l.SupplierId, SupplierName = l.Supplier?.Name, Status = l.Status.ToString(),
-        Items = l.Items.Select(i => new ProcurementListItemDto
+        Items = l.Items.Select(i =>
         {
-            Id = i.Id, IngredientId = i.IngredientId, IngredientName = i.Ingredient?.Name ?? string.Empty, IngredientArticleNumber = i.Ingredient?.ArticleNumber ?? string.Empty,
-            CategoryName = i.Ingredient?.Category?.Name ?? string.Empty, SupplierName = i.Ingredient?.Supplier?.Name,
-            Unit = i.Unit.ToString(), TotalQuantityBase = i.TotalQuantityBase, PurchaseQuantity = i.PurchaseQuantity,
+            var (unitPrice, perPurchaseUnit) = PriceItem(i, l.SupplierId);
+            return new ProcurementListItemDto
+            {
+                Id = i.Id, IngredientId = i.IngredientId, IngredientName = i.Ingredient?.Name ?? string.Empty, IngredientArticleNumber = i.Ingredient?.ArticleNumber ?? string.Empty,
+                CategoryName = i.Ingredient?.Category?.Name ?? string.Empty, SupplierName = i.Ingredient?.Supplier?.Name,
+                Unit = i.Unit.ToString(), TotalQuantityBase = i.TotalQuantityBase, PurchaseQuantity = i.PurchaseQuantity,
+                UnitPrice = unitPrice is { } p ? decimal.Round(p.Price, 4, MidpointRounding.AwayFromZero) : null,
+                PriceUnit = unitPrice?.Unit.ToString(),
+                PricePerPurchaseUnit = perPurchaseUnit is { } pp ? decimal.Round(pp, 4, MidpointRounding.AwayFromZero) : null,
+                TotalCost = perPurchaseUnit is { } c ? decimal.Round(c * i.PurchaseQuantity, 2, MidpointRounding.AwayFromZero) : null,
+            };
         }).ToList(),
     };
+
+    /// <summary>PurchaseQuantity is in purchase units (see GenerateAsync: ceil(total / ConversionFactor)),
+    /// so one purchase unit = ConversionFactor base units — priced that way, the total is what the
+    /// order actually costs, rounding up to whole packs included.</summary>
+    private static (IngredientPricing.UnitPrice? UnitPrice, decimal? PricePerPurchaseUnit) PriceItem(ProcurementListItem item, Guid? supplierId)
+    {
+        if (item.Ingredient is not { } ingredient) return (null, null);
+        var price = IngredientPricing.Resolve(ingredient, supplierId);
+        var factor = ingredient.ConversionFactor > 0 ? ingredient.ConversionFactor : 1;
+        return (price, IngredientPricing.Cost(ingredient, factor, ingredient.BaseUnit, supplierId));
+    }
 }

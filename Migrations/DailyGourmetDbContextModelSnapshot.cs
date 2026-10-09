@@ -1333,6 +1333,10 @@ namespace DailyGourmet.Api.Migrations
                     b.Property<bool>("LactoseFree")
                         .HasColumnType("bit");
 
+                    b.Property<decimal?>("ManualCostPerPortion")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("decimal(10,2)");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)

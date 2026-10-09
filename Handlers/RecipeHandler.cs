@@ -80,6 +80,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             StorageNote = dto.StorageNote,
             ShelfLifeAfterPrep = dto.ShelfLifeAfterPrep,
             ReductionFactor = dto.ReductionFactor,
+            ManualCostPerPortion = dto.ManualCostPerPortion,
             Active = dto.Active,
             Version = 1,
             CreatedAt = DateTime.UtcNow,
@@ -115,6 +116,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
         recipe.StorageNote = dto.StorageNote;
         recipe.ShelfLifeAfterPrep = dto.ShelfLifeAfterPrep;
         recipe.ReductionFactor = dto.ReductionFactor;
+        recipe.ManualCostPerPortion = dto.ManualCostPerPortion;
         recipe.Active = dto.Active;
         recipe.Version += 1;
         recipe.UpdatedAt = DateTime.UtcNow;
@@ -155,6 +157,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             StorageNote = source.StorageNote,
             ShelfLifeAfterPrep = source.ShelfLifeAfterPrep,
             ReductionFactor = source.ReductionFactor,
+            ManualCostPerPortion = source.ManualCostPerPortion,
             Active = true,
             Version = 1,
             CreatedAt = DateTime.UtcNow,
@@ -667,34 +670,6 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             db.RecipeTargetGroups.Add(new RecipeTargetGroup { RecipeId = recipe.Id, TargetAudienceGroupId = groupId });
     }
 
-    /// <summary>Cheapest known price for an ingredient, and the unit it's priced in: the cheapest
-    /// supplier offer if one exists, else the ingredient's standard PurchasePrice (per PurchaseUnit,
-    /// converted to a per-BaseUnit price via ConversionFactor). Null when no price is known at all.</summary>
-    private static (decimal PricePerUnit, Unit Unit)? ResolveUnitPrice(Ingredient ingredient)
-    {
-        var cheapest = ingredient.SupplierPrices.OrderBy(p => p.Price).FirstOrDefault();
-        if (cheapest != null) return (cheapest.Price, cheapest.Unit);
-        if (ingredient.PurchasePrice is { } purchasePrice && ingredient.ConversionFactor > 0)
-            return (purchasePrice / ingredient.ConversionFactor, ingredient.BaseUnit);
-        return null;
-    }
-
-    /// <summary>Converts a quantity between units within the same family (g&lt;-&gt;kg, ml&lt;-&gt;l);
-    /// returns null for cross-family or Stueck conversions, since there's no general unit-conversion
-    /// system (e.g. density) anywhere in this codebase to fall back on.</summary>
-    private static decimal? ConvertQuantity(decimal quantity, Unit from, Unit to)
-    {
-        if (from == to) return quantity;
-        return (from, to) switch
-        {
-            (Unit.g, Unit.kg) => quantity / 1000m,
-            (Unit.kg, Unit.g) => quantity * 1000m,
-            (Unit.ml, Unit.l) => quantity / 1000m,
-            (Unit.l, Unit.ml) => quantity * 1000m,
-            _ => null,
-        };
-    }
-
     /// <summary>Sum of each ingredient's quantity × cheapest known price, unit-normalized where
     /// possible, divided by portion count. Ingredients that can't be priced (no price at all, or an
     /// incompatible unit) are simply left out of the sum — this is a rough estimate, not an
@@ -706,18 +681,19 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
         var pricedAny = false;
         foreach (var ri in recipe.Ingredients)
         {
-            var priced = ResolveUnitPrice(ri.Ingredient);
-            if (priced is not { } p) continue;
-            var convertedQuantity = ConvertQuantity(ri.Quantity, ri.Unit, p.Unit);
-            if (convertedQuantity is not { } qty) continue;
-            total += qty * p.PricePerUnit;
+            if (IngredientPricing.Cost(ri.Ingredient, ri.Quantity, ri.Unit) is not { } cost) continue;
+            total += cost;
             pricedAny = true;
         }
         return pricedAny ? decimal.Round(total / recipe.StandardPortions, 2, MidpointRounding.AwayFromZero) : null;
     }
 
+    /// <summary>ManualCostPerPortion when the kitchen maintains one, else the live estimate.</summary>
+    public static decimal? EffectiveCostPerPortion(Recipe recipe) => recipe.ManualCostPerPortion ?? ComputeEstimatedCostPerPortion(recipe);
+
     private static RecipeDto ToDto(Recipe r)
     {
+        var computedCost = ComputeEstimatedCostPerPortion(r);
         var allergensOverridden = r.AllergenOverrides.Count > 0;
         var resolvedAllergens = allergensOverridden
             ? r.AllergenOverrides.Select(a => a.Text).Distinct().ToArray()
@@ -745,7 +721,9 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             GlutenFree = r.GlutenFree,
             LactoseFree = r.LactoseFree,
             DgeCertified = r.DgeCertified,
-            EstimatedCostPerPortion = ComputeEstimatedCostPerPortion(r),
+            EstimatedCostPerPortion = r.ManualCostPerPortion ?? computedCost,
+            ComputedCostPerPortion = computedCost,
+            ManualCostPerPortion = r.ManualCostPerPortion,
             Nutrition = r.Nutrition is { } n
                 ? new RecipeNutritionDto
                 {

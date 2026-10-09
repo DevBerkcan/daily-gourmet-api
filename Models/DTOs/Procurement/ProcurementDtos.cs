@@ -13,6 +13,15 @@ public class ProcurementListItemDto
     public string Unit { get; set; } = string.Empty;
     public decimal TotalQuantityBase { get; set; }
     public decimal PurchaseQuantity { get; set; }
+    /// <summary>Price per PriceUnit — the list's supplier's offer if it has one, else the cheapest
+    /// known price (see IngredientPricing). Null when no price is known.</summary>
+    public decimal? UnitPrice { get; set; }
+    public string? PriceUnit { get; set; }
+    /// <summary>What one purchase unit (one PurchaseQuantity step) costs. Null when unpriced or the
+    /// units can't be converted.</summary>
+    public decimal? PricePerPurchaseUnit { get; set; }
+    /// <summary>PurchaseQuantity × PricePerPurchaseUnit.</summary>
+    public decimal? TotalCost { get; set; }
 }
 
 public class ProcurementListDto
@@ -65,4 +74,9 @@ public class WeekRecipeRequirementDto
     public string RecipeName { get; set; } = string.Empty;
     public int TotalPortions { get; set; }
     public int FacilityCount { get; set; }
+    /// <summary>Recipe's effective cost per portion (manual price if maintained, else computed from
+    /// ingredient prices) — see RecipeHandler.EffectiveCostPerPortion. Null when unknown.</summary>
+    public decimal? CostPerPortion { get; set; }
+    public bool CostIsManual { get; set; }
+    public decimal? TotalCost { get; set; }
 }

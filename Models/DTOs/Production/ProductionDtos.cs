@@ -66,6 +66,13 @@ public class IngredientRequirementDto
     public decimal TotalQuantity { get; set; }
     public string? StorageLocationName { get; set; }
     public string[] ContributingRecipeNames { get; set; } = [];
+    /// <summary>Pricing — only filled by ProcurementOverviewHandler (Einkauf); null elsewhere or when
+    /// no price is known. UnitPrice is per PriceUnit, from the cheapest supplier (SupplierName) or the
+    /// ingredient's standard price (SupplierName null).</summary>
+    public decimal? UnitPrice { get; set; }
+    public string? PriceUnit { get; set; }
+    public string? SupplierName { get; set; }
+    public decimal? TotalCost { get; set; }
 }
 
 public class DeviationDto
