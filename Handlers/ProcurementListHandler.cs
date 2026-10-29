@@ -55,6 +55,10 @@ public class ProcurementListHandler(DailyGourmetDbContext db, ITenantContext ten
         var plan = await db.ProductionPlans.Include(p => p.Items).ThenInclude(i => i.Recipe).ThenInclude(r => r.Ingredients).ThenInclude(ri => ri.Ingredient)
             .FirstOrDefaultAsync(p => p.Id == dto.ProductionPlanId, ct) ?? throw new NotFoundException(nameof(ProductionPlan), dto.ProductionPlanId);
 
+        // Totals are kept in the ingredient's BaseUnit, because ConversionFactor means "BaseUnits per
+        // PurchaseUnit" — dividing a recipe quantity in g by a factor meant for kg ordered 1000× too
+        // much. Recipe lines in a unit that can't be converted to the BaseUnit (e.g. Stück vs. kg) stay
+        // in their own unit and get PurchaseQuantity = the raw total, flagged by ConversionFactor 0.
         var aggregate = new Dictionary<(Guid IngredientId, Unit Unit), (decimal Total, decimal ConversionFactor)>();
         foreach (var item in plan.Items)
         {
@@ -62,11 +66,14 @@ public class ProcurementListHandler(DailyGourmetDbContext db, ITenantContext ten
             var scaleFactor = (decimal)(item.OrderedQuantity + item.AdjustmentQuantity) / item.Recipe.StandardPortions;
             foreach (var ri in item.Recipe.Ingredients)
             {
-                var key = (ri.IngredientId, ri.Unit);
                 var scaled = ri.Quantity * scaleFactor;
+                var inBase = IngredientPricing.ConvertQuantity(scaled, ri.Unit, ri.Ingredient.BaseUnit);
+                var key = inBase is null ? (ri.IngredientId, ri.Unit) : (ri.IngredientId, ri.Ingredient.BaseUnit);
+                var amount = inBase ?? scaled;
+                var factor = inBase is null ? 0 : ri.Ingredient.ConversionFactor;
                 aggregate[key] = aggregate.TryGetValue(key, out var existing)
-                    ? (existing.Total + scaled, existing.ConversionFactor)
-                    : (scaled, ri.Ingredient.ConversionFactor);
+                    ? (existing.Total + amount, existing.ConversionFactor)
+                    : (amount, factor);
             }
         }
 
@@ -79,7 +86,7 @@ public class ProcurementListHandler(DailyGourmetDbContext db, ITenantContext ten
             .ToDictionaryAsync(p => p.IngredientId, p => (p.SupplierId, p.Supplier.Name), ct);
 
         var bySupplier = aggregate
-            .Where(kv => kv.Value.ConversionFactor > 0)
+            .Where(kv => kv.Value.Total > 0)
             .GroupBy(kv => cheapestSupplierByIngredient.TryGetValue(kv.Key.IngredientId, out var s) ? s.SupplierId : (Guid?)null);
 
         ProcurementList? firstList = null;
@@ -100,7 +107,7 @@ public class ProcurementListHandler(DailyGourmetDbContext db, ITenantContext ten
                 db.ProcurementListItems.Add(new ProcurementListItem
                 {
                     Id = Guid.NewGuid(), ProcurementListId = list.Id, IngredientId = kv.Key.IngredientId, Unit = kv.Key.Unit,
-                    TotalQuantityBase = decimal.Round(kv.Value.Total, 3), PurchaseQuantity = Math.Ceiling(kv.Value.Total / kv.Value.ConversionFactor),
+                    TotalQuantityBase = decimal.Round(kv.Value.Total, 3), PurchaseQuantity = Math.Ceiling(kv.Value.ConversionFactor > 0 ? kv.Value.Total / kv.Value.ConversionFactor : kv.Value.Total),
                     CreatedAt = DateTime.UtcNow,
                 });
             }

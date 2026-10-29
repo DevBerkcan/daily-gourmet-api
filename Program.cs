@@ -108,7 +108,23 @@ builder.Services.AddSupportDashboardModule();
 
 // ---- MVC / Swagger ----
 builder.Services.AddControllers()
-    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
+    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()))
+    // Model-validation failures ([Required], [Range], [MaxLength], unparseable JSON) used to come back
+    // as ProblemDetails without a `message`, so the frontend could only show "Anfrage fehlgeschlagen
+    // (400)". Return the same ApiResponse shape as every other error, with the concrete messages.
+    .ConfigureApiBehaviorOptions(options => options.InvalidModelStateResponseFactory = context =>
+    {
+        var messages = context.ModelState
+            .Where(e => e.Value?.Errors.Count > 0)
+            .SelectMany(e => e.Value!.Errors.Select(err =>
+                !string.IsNullOrWhiteSpace(err.ErrorMessage) && err.Exception is null
+                    ? err.ErrorMessage
+                    : $"Ungültiger Wert für „{(string.IsNullOrEmpty(e.Key) ? "Anfrage" : e.Key.TrimStart('$', '.'))}“."))
+            .Distinct()
+            .ToList();
+        var message = messages.Count > 0 ? string.Join(" ", messages) : "Die Eingaben sind ungültig.";
+        return new Microsoft.AspNetCore.Mvc.BadRequestObjectResult(DailyGourmet.Api.Models.DTOs.ApiResponse.Fail(message));
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {

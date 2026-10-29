@@ -16,7 +16,8 @@ public class DashboardHandler(DailyGourmetDbContext db, ITenantContext tenantCon
     public async Task<AdminDashboardSummaryDto> AdminSummaryAsync(CancellationToken ct = default)
     {
         var tenantId = tenantContext.TenantId!.Value;
-        var now = DateTime.UtcNow;
+        // Local wall-clock time of the tenant — UTC would show yesterday's portions until 01:00/02:00.
+        var now = TenantClock.UtcToLocal(DateTime.UtcNow, await TenantClock.ForTenantAsync(db, tenantId, ct));
         var week = ISOWeek.GetWeekOfYear(now);
         var year = ISOWeek.GetYear(now);
 

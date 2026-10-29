@@ -50,16 +50,30 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
         var facilityId = tenantContext.FacilityId ?? dto.FacilityId ?? throw new ValidationException("FacilityId ist erforderlich.");
         EnsureFacilityAccess(facilityId);
 
+        if (dto.Items.GroupBy(i => (i.Date, i.RecipeId)).Any(g => g.Count() > 1))
+            throw new ValidationException("Jedes Gericht darf pro Tag nur einmal in der Bestellung vorkommen.");
+
+        var plan = await db.MealPlans.Include(m => m.Facilities).FirstOrDefaultAsync(m => m.Id == dto.MealPlanId, ct)
+            ?? throw new NotFoundException(nameof(MealPlan), dto.MealPlanId);
+        if (plan.Status != MealPlanStatus.PUBLISHED)
+            throw new ConflictException("Bestellungen sind nur für veröffentlichte Speisepläne möglich.");
+        if (plan.Facilities.All(f => f.FacilityId != facilityId))
+            throw new ForbiddenException("Dieser Speiseplan ist dieser Einrichtung nicht zugeordnet.");
+
         var order = await db.Orders.Include(o => o.Items).FirstOrDefaultAsync(o => o.FacilityId == facilityId && o.MealPlanId == dto.MealPlanId, ct);
         var wasAlreadySubmitted = order?.Status is OrderStatus.SUBMITTED or OrderStatus.CONFIRMED or OrderStatus.LOCKED;
         var deadline = await ComputeDeadlineAsync(facilityId, dto.Items, ct);
 
-        //if (dto.Submit && DateTime.UtcNow > deadline)
-        //    //throw new ConflictException("Die Bestellfrist ist abgelaufen.");
+        // Facilities are bound by the deadline (afterwards only the same-day reduction via
+        // AdjustSameDayAsync is possible); tenant staff may still correct an order on their behalf.
+        var isFacilityCaller = tenantContext.FacilityId is not null;
+        if (isFacilityCaller && DateTime.UtcNow > deadline && (dto.Submit || wasAlreadySubmitted))
+            throw new ConflictException("Die Bestellfrist ist abgelaufen — Änderungen sind nur noch über die Tagesanpassung möglich.");
 
         if (dto.Submit)
             await EnsureEverySlotDecidedAsync(facilityId, dto.MealPlanId, dto.Items, ct);
 
+        var removedItemIds = new List<Guid>();
         if (order is null)
         {
             order = new Order
@@ -73,19 +87,47 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
         {
             if (order.Status is OrderStatus.LOCKED or OrderStatus.CANCELLED)
                 throw new ConflictException("Bestellung kann in diesem Status nicht mehr geändert werden.");
-            db.OrderItems.RemoveRange(order.Items);
             order.DeadlineAtUtc = deadline;
             order.UpdatedAt = DateTime.UtcNow;
         }
 
-        foreach (var item in dto.Items)
-            db.OrderItems.Add(new OrderItem { Id = Guid.NewGuid(), OrderId = order.Id, Date = item.Date, RecipeId = item.RecipeId, Portions = item.Portions, Note = item.Note, CreatedAt = DateTime.UtcNow });
+        // Update items in place, matched by (date, recipe), instead of delete-all + re-insert: route
+        // loading positions reference OrderItem.Id (Restrict FK), so re-creating them failed with a
+        // 500 as soon as the order was on a tour. RouteStopItemSync then mirrors the change.
+        var incoming = dto.Items.ToDictionary(i => (i.Date, i.RecipeId));
+        foreach (var existing in order.Items.ToList())
+        {
+            if (incoming.Remove((existing.Date, existing.RecipeId), out var change))
+            {
+                existing.Portions = change.Portions;
+                existing.Note = change.Note;
+                existing.UpdatedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                removedItemIds.Add(existing.Id);
+                db.OrderItems.Remove(existing);
+            }
+        }
+        foreach (var item in incoming.Values)
+        {
+            var orderItem = new OrderItem { Id = Guid.NewGuid(), OrderId = order.Id, Date = item.Date, RecipeId = item.RecipeId, Portions = item.Portions, Note = item.Note, CreatedAt = DateTime.UtcNow };
+            db.OrderItems.Add(orderItem);
+            order.Items.Add(orderItem);
+        }
 
-        order.Status = dto.Submit ? OrderStatus.SUBMITTED : OrderStatus.DRAFT;
-        if (dto.Submit) order.SubmittedAt = DateTime.UtcNow;
+        // An already submitted/confirmed order keeps its status when re-saved — previously a plain
+        // save reset it to DRAFT and a submit reset CONFIRMED to SUBMITTED, silently dropping the
+        // admin's confirmation.
+        if (!wasAlreadySubmitted)
+        {
+            order.Status = dto.Submit ? OrderStatus.SUBMITTED : OrderStatus.DRAFT;
+            if (dto.Submit) order.SubmittedAt = DateTime.UtcNow;
+        }
 
+        await RouteStopItemSync.SyncAsync(db, order, removedItemIds, ct);
         await db.SaveChangesAsync(ct);
-        if (dto.Submit && wasAlreadySubmitted != true)
+        if (dto.Submit && !wasAlreadySubmitted)
             await NotifyTenantAdminsOfNewOrderAsync(order.TenantId, facilityId, dto.Items.Sum(i => i.Portions), order.DeadlineAtUtc, ct);
         return await GetByIdAsync(order.Id, ct);
     }
@@ -140,12 +182,13 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
 
         var facility = await db.Facilities.FirstOrDefaultAsync(f => f.Id == facilityId, ct);
         var facilityName = facility?.Name ?? "Eine Einrichtung";
+        var deadlineLocal = TenantClock.UtcToLocal(deadlineAtUtc, await TenantClock.ForTenantAsync(db, tenantId, ct));
         var body = $"""
             <p><strong>{facilityName}</strong> hat eine Bestellung abgesendet.</p>
-            <p>{portionen} Portionen insgesamt · Frist: {deadlineAtUtc:dd.MM.yyyy HH:mm} Uhr</p>
+            <p>{portionen} Portionen insgesamt · Frist: {deadlineLocal:dd.MM.yyyy HH:mm} Uhr</p>
             """;
         var html = EmailTemplate.Render($"{facilityName} hat eine Bestellung abgesendet.", body);
-        var text = $"{facilityName} hat eine Bestellung abgesendet. {portionen} Portionen insgesamt, Frist: {deadlineAtUtc:dd.MM.yyyy HH:mm} Uhr.";
+        var text = $"{facilityName} hat eine Bestellung abgesendet. {portionen} Portionen insgesamt, Frist: {deadlineLocal:dd.MM.yyyy HH:mm} Uhr.";
         foreach (var user in empfaenger)
             await email.SendAsync(user.Email, user.Name, $"Neue Bestellung von {facilityName}", html, text);
     }
@@ -208,13 +251,15 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
         var deadlineTime = facility.OrderDeadlineTime ?? settings?.DefaultOrderDeadlineTime ?? new TimeSpan(9, 0, 0);
         var excludeWeekends = settings?.ExcludeWeekendsFromDeadline ?? true;
 
-        var earliestDate = items.Count > 0 ? items.Min(i => i.Date) : DateOnly.FromDateTime(DateTime.UtcNow);
+        var tz = await TenantClock.ForTenantAsync(db, facility.TenantId, ct);
+        var earliestDate = items.Count > 0 ? items.Min(i => i.Date) : TenantClock.Today(tz);
         var deadlineDate = earliestDate.AddDays(-offsetDays);
         if (excludeWeekends)
             while (deadlineDate.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
                 deadlineDate = deadlineDate.AddDays(-1);
 
-        return deadlineDate.ToDateTime(TimeOnly.FromTimeSpan(deadlineTime), DateTimeKind.Utc);
+        // deadlineTime is local wall-clock time of the tenant, not UTC (see TenantClock).
+        return TenantClock.LocalToUtc(deadlineDate, deadlineTime, tz);
     }
 
     /// <summary>Blocks submit unless every (date, recipe) slot the published plan offers on this
@@ -253,6 +298,7 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
 
         var settings = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == order.TenantId, ct);
         var cutoffTime = order.Facility.SameDayAdjustmentDeadlineTime ?? settings?.SameDayAdjustmentDeadlineTime ?? new TimeSpan(9, 0, 0);
+        var tz = await TenantClock.ForTenantAsync(db, order.TenantId, ct);
 
         foreach (var change in dto.Items)
         {
@@ -261,7 +307,7 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
             if (change.Portions > item.Portions)
                 throw new ValidationException($"Portionen für '{item.RecipeId}' können am Liefertag nur reduziert, nicht erhöht werden.");
 
-            var cutoff = item.Date.ToDateTime(TimeOnly.FromTimeSpan(cutoffTime), DateTimeKind.Utc);
+            var cutoff = TenantClock.LocalToUtc(item.Date, cutoffTime, tz);
             if (DateTime.UtcNow > cutoff)
                 throw new ConflictException($"Die Frist für Anpassungen am {item.Date:dd.MM.yyyy} ist abgelaufen.");
 
@@ -277,6 +323,8 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
             Action = "Portionen am Liefertag angepasst", Entity = "Order", EntityId = order.Id.ToString(),
             Reason = string.Join("; ", dto.Items.Select(i => i.Note)), CreatedAtUtc = DateTime.UtcNow,
         });
+        // Reduction must reach the driver's loading list, which is a snapshot from route creation.
+        await RouteStopItemSync.SyncAsync(db, order, [], ct);
         await db.SaveChangesAsync(ct);
         return await GetByIdAsync(id, ct);
     }

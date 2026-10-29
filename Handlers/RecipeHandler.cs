@@ -281,6 +281,11 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
         // ---- Step 1: sync every raw ingredient referenced by a recipe line (reuses the existing,
         // manual-edit-protecting Ingredient sync — see IngredientHandler.SyncAsync) ----
         var usedArticleNumbers = new HashSet<string>(await db.Ingredients.Select(i => i.ArticleNumber).ToListAsync(ct), StringComparer.OrdinalIgnoreCase);
+        // Existing ingredients keep their article number — SyncAsync writes whatever the row carries,
+        // and a freshly generated ZUT-xxxx on every import broke supplier price files that match by it.
+        var articleNumberByRef = (await db.Ingredients.Where(i => i.ExternalRefId != null).Select(i => new { i.ExternalRefId, i.ArticleNumber }).ToListAsync(ct))
+            .GroupBy(i => i.ExternalRefId!)
+            .ToDictionary(g => g.Key, g => g.First().ArticleNumber);
         var ingredientRows = zutatenRows
             .GroupBy(r => r.IngredientExternalRefId)
             .Select(g => g.First())
@@ -288,7 +293,7 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             {
                 ExternalRefId = u.IngredientExternalRefId,
                 Name = u.IngredientName,
-                ArticleNumber = NextArticleNumber(usedArticleNumbers),
+                ArticleNumber = articleNumberByRef.GetValueOrDefault(u.IngredientExternalRefId) ?? NextArticleNumber(usedArticleNumbers),
                 BaseUnit = Unit.kg,
                 PurchaseUnit = "kg",
                 ConversionFactor = 1,

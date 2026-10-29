@@ -261,12 +261,24 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
         return await GetByIdAsync(id, ct);
     }
 
+    public async Task<PublishRulesDto> PublishRulesAsync(CancellationToken ct = default) => new()
+    {
+        RequireReviewBeforePublish = await db.TenantSettings.Where(s => s.TenantId == tenantContext.TenantId)
+            .Select(s => (bool?)s.RequireReviewBeforePublish).FirstOrDefaultAsync(ct) ?? true,
+    };
+
     public async Task<MealPlanDto> PublishAsync(Guid id, CancellationToken ct = default)
     {
         var plan = await db.MealPlans.Include(m => m.Facilities)
             .Include(m => m.Days).ThenInclude(d => d.Items).ThenInclude(i => i.Recipe).ThenInclude(r => r.Nutrition)
             .FirstOrDefaultAsync(m => m.Id == id, ct) ?? throw new NotFoundException(nameof(MealPlan), id);
-        if (plan.Status != MealPlanStatus.REVIEW) throw new ConflictException("Nur Pläne in Prüfung können veröffentlicht werden.");
+        // Mandanteneinstellung "Prüfung vor Veröffentlichung": ist sie aus, darf direkt aus dem
+        // Entwurf veröffentlicht werden (vorher wurde die Einstellung gespeichert, aber nie gelesen).
+        var requireReview = await db.TenantSettings.Where(s => s.TenantId == plan.TenantId).Select(s => (bool?)s.RequireReviewBeforePublish).FirstOrDefaultAsync(ct) ?? true;
+        var allowed = plan.Status == MealPlanStatus.REVIEW || (!requireReview && plan.Status == MealPlanStatus.DRAFT);
+        if (!allowed)
+            throw new ConflictException(requireReview ? "Nur Pläne in Prüfung können veröffentlicht werden." : "Nur Entwürfe oder Pläne in Prüfung können veröffentlicht werden.");
+        if (plan.IsTemplate) throw new ConflictException("Vorlagen können nicht veröffentlicht werden.");
 
         foreach (var day in plan.Days)
         foreach (var item in day.Items)

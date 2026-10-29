@@ -97,17 +97,10 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
 
         var orderItems = await db.OrderItems
             .Include(oi => oi.Order)
-            .Where(oi => oi.Order.FacilityId == facility.Id && BindingStatuses.Contains(oi.Order.Status) && oi.Date == route.Date)
+            .Where(oi => oi.Order.FacilityId == facility.Id && BindingStatuses.Contains(oi.Order.Status) && oi.Date == route.Date && oi.Portions > 0)
             .ToListAsync(ct);
         foreach (var orderItem in orderItems)
-        {
-            db.RouteStopItems.Add(new RouteStopItem
-            {
-                Id = Guid.NewGuid(), RouteStopId = stop.Id, RecipeId = orderItem.RecipeId, OrderId = orderItem.OrderId, OrderItemId = orderItem.Id,
-                Portions = orderItem.Portions, ContainerDescription = $"{Math.Ceiling(orderItem.Portions / 15.0)} × GN 1/1",
-                TemperatureRequirement = "mind. 65 °C", CreatedAt = DateTime.UtcNow,
-            });
-        }
+            db.RouteStopItems.Add(RouteStopItemSync.Build(stop.Id, orderItem));
 
         await db.SaveChangesAsync(ct);
         return await GetByIdAsync(routeId, ct);
@@ -318,17 +311,10 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
 
             var orderItems = await db.OrderItems
                 .Include(oi => oi.Order)
-                .Where(oi => oi.Order.FacilityId == facility.Id && BindingStatuses.Contains(oi.Order.Status) && oi.Date == dto.Date)
+                .Where(oi => oi.Order.FacilityId == facility.Id && BindingStatuses.Contains(oi.Order.Status) && oi.Date == dto.Date && oi.Portions > 0)
                 .ToListAsync(ct);
             foreach (var orderItem in orderItems)
-            {
-                db.RouteStopItems.Add(new RouteStopItem
-                {
-                    Id = Guid.NewGuid(), RouteStopId = stop.Id, RecipeId = orderItem.RecipeId, OrderId = orderItem.OrderId, OrderItemId = orderItem.Id,
-                    Portions = orderItem.Portions, ContainerDescription = $"{Math.Ceiling(orderItem.Portions / 15.0)} × GN 1/1",
-                    TemperatureRequirement = "mind. 65 °C", CreatedAt = DateTime.UtcNow,
-                });
-            }
+                db.RouteStopItems.Add(RouteStopItemSync.Build(stop.Id, orderItem));
         }
 
         return (skippedFacilityNames, windowWarnings);
@@ -443,7 +429,11 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
     {
         var driver = await GetCallerDriverAsync(ct);
         var query = FullQuery(db).Where(r => r.DriverId == driver.Id);
-        if (todayOnly) query = query.Where(r => r.Date == DateOnly.FromDateTime(DateTime.UtcNow));
+        if (todayOnly)
+        {
+            var today = TenantClock.Today(await TenantClock.ForTenantAsync(db, tenantContext.TenantId!.Value, ct));
+            query = query.Where(r => r.Date == today);
+        }
         var routes = await query.OrderBy(r => r.Date).ToListAsync(ct);
         return routes.Select(ToDto).ToList();
     }

@@ -27,6 +27,12 @@ public class MealPlansController(MealPlanHandler handler) : ControllerBase
         return Ok(ApiResponse<PagedResult<MealPlanDto>>.Ok(result));
     }
 
+    /// <summary>Whether a DRAFT may be published directly (tenant setting "Prüfung vor
+    /// Veröffentlichung" off) — lets the UI offer "Veröffentlichen" on drafts.</summary>
+    [HttpGet("publish-rules")]
+    public async Task<ActionResult<ApiResponse<PublishRulesDto>>> PublishRules(CancellationToken ct) =>
+        Ok(ApiResponse<PublishRulesDto>.Ok(await handler.PublishRulesAsync(ct)));
+
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<ApiResponse<MealPlanDto>>> GetById(Guid id, CancellationToken ct) =>
         Ok(ApiResponse<MealPlanDto>.Ok(await handler.GetByIdAsync(id, ct)));

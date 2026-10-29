@@ -83,3 +83,8 @@ public class RejectMealPlanDto
 {
     [Required, MaxLength(1000)] public string Reason { get; set; } = string.Empty;
 }
+
+public class PublishRulesDto
+{
+    public bool RequireReviewBeforePublish { get; set; }
+}
