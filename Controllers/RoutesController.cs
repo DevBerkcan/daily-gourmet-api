@@ -27,6 +27,11 @@ public class RoutesController(DeliveryRouteHandler handler) : ControllerBase
     public async Task<ActionResult<ApiResponse<DuplicateWeekResultDto>>> DuplicateWeek([FromBody] DuplicateWeekDto dto, CancellationToken ct) =>
         Ok(ApiResponse<DuplicateWeekResultDto>.Ok(await handler.DuplicateWeekAsync(dto, ct)));
 
+    [HttpPost("{id:guid}/copy")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
+    public async Task<ActionResult<ApiResponse<DuplicateWeekResultDto>>> CopyToDates(Guid id, [FromBody] CopyRouteDto dto, CancellationToken ct) =>
+        Ok(ApiResponse<DuplicateWeekResultDto>.Ok(await handler.CopyToDatesAsync(id, dto, ct)));
+
     [HttpPost("{routeId:guid}/stops")]
     [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN")]
     public async Task<ActionResult<ApiResponse<DeliveryRouteDto>>> AddStop(Guid routeId, [FromBody] AddStopDto dto, CancellationToken ct) =>

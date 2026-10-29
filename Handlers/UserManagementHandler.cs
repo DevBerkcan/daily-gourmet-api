@@ -35,7 +35,7 @@ public class UserManagementHandler(IRepository<User> users, ITenantContext tenan
 
     public async Task<UserDto> InviteAsync(InviteUserDto dto, CancellationToken ct = default)
     {
-        if (!Enum.TryParse<Role>(dto.Role, out var role)) throw new ValidationException("Ungültige Rolle.");
+        var role = ParseAssignableRole(dto.Role);
         var facilityId = dto.FacilityId;
 
         if (tenantContext.Role == "FACILITY_ADMIN")
@@ -64,6 +64,20 @@ public class UserManagementHandler(IRepository<User> users, ITenantContext tenan
         return result;
     }
 
+    /// <summary>Roles a tenant-side caller may hand out. Enum.TryParse alone accepted SUPER_ADMIN (and
+    /// numeric strings), letting a TENANT_ADMIN escalate any account to platform-wide access; only a
+    /// TENANT_OWNER (or super admin) may grant TENANT_OWNER.</summary>
+    private Role ParseAssignableRole(string? raw)
+    {
+        if (!Enum.TryParse<Role>(raw, out var role) || !Enum.IsDefined(role) || int.TryParse(raw, out _))
+            throw new ValidationException("Ungültige Rolle.");
+        if (tenantContext.IsSuperAdmin) return role;
+        if (role == Role.SUPER_ADMIN) throw new ForbiddenException("Diese Rolle kann nicht vergeben werden.");
+        if (role == Role.TENANT_OWNER && tenantContext.Role != "TENANT_OWNER")
+            throw new ForbiddenException("Nur der Inhaber kann die Inhaber-Rolle vergeben.");
+        return role;
+    }
+
     /// <summary>Lowercased, restricted to letters/digits/.-_ — same rule as
     /// UserInvitationHelper.GenerateUniqueUsernameAsync, but here the admin typed it explicitly
     /// rather than it being derived, so an out-of-range character is a validation error rather than
@@ -87,7 +101,7 @@ public class UserManagementHandler(IRepository<User> users, ITenantContext tenan
         }
         else
         {
-            if (dto.Role is not null && Enum.TryParse<Role>(dto.Role, out var role)) user.Role = role;
+            if (dto.Role is not null) user.Role = ParseAssignableRole(dto.Role);
             if (dto.FacilityId is not null) user.FacilityId = dto.FacilityId;
         }
 

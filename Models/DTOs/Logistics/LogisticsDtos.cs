@@ -111,6 +111,15 @@ public class DuplicateWeekResultDto
 {
     public int CreatedCount { get; set; }
     public List<string> SkippedExisting { get; set; } = [];
+    /// <summary>Kunden, die am Zieltag schon auf einer anderen Tour stehen und deshalb nicht
+    /// mitkopiert wurden (eine Einrichtung pro Tag nur auf einer Tour).</summary>
+    public List<string> SkippedFacilities { get; set; } = [];
+}
+
+/// <summary>Tour auf weitere Tage kopieren — siehe DeliveryRouteHandler.CopyToDatesAsync.</summary>
+public class CopyRouteDto
+{
+    [Required, MinLength(1)] public DateOnly[] Dates { get; set; } = [];
 }
 
 public class DriverDto

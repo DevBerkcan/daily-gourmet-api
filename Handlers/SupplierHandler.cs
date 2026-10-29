@@ -110,8 +110,15 @@ public class SupplierHandler(IRepository<Supplier> suppliers, DailyGourmetDbCont
             ? ReadXlsxRows(content)
             : ReadCsvRows(content);
 
-        var ingredientsByArticleNumber = await db.Ingredients.ToDictionaryAsync(i => i.ArticleNumber, i => i, StringComparer.OrdinalIgnoreCase, ct);
-        var existingPrices = await db.IngredientSupplierPrices.Where(p => p.SupplierId == supplierId).ToDictionaryAsync(p => p.IngredientId, ct);
+        // GroupBy before ToDictionary: a supplier may hold several prices for one ingredient (see
+        // IngredientHandler.AddPriceAsync) and article numbers only differ case-sensitively in the DB —
+        // a plain ToDictionary threw on the duplicate key (500). The import updates the newest price.
+        var ingredientsByArticleNumber = (await db.Ingredients.ToListAsync(ct))
+            .GroupBy(i => i.ArticleNumber, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        var existingPrices = (await db.IngredientSupplierPrices.Where(p => p.SupplierId == supplierId).ToListAsync(ct))
+            .GroupBy(p => p.IngredientId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(p => p.UpdatedAt ?? p.CreatedAt).First());
 
         var result = new ImportResultDto();
         var now = DateTime.UtcNow;

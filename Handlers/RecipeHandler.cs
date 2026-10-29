@@ -319,9 +319,13 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
             ?? await db.Users.OrderBy(u => u.CreatedAt).Select(u => (Guid?)u.Id).FirstOrDefaultAsync(ct)
             ?? throw new ValidationException("Kein Benutzer im Mandanten vorhanden, dem importierte Rezepte zugeordnet werden können.");
 
-        var existingRecipes = await db.Recipes
+        // Recipe names aren't unique — two recipes differing only in case made ToDictionary throw and
+        // every import fail with a 500. The oldest match is the one the import updates.
+        var existingRecipes = (await db.Recipes
             .Include(r => r.Ingredients).Include(r => r.AllergenOverrides).Include(r => r.AdditiveOverrides).Include(r => r.NutritionClaims)
-            .ToDictionaryAsync(r => r.Name, StringComparer.OrdinalIgnoreCase, ct);
+            .ToListAsync(ct))
+            .GroupBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.OrderBy(r => r.CreatedAt).First(), StringComparer.OrdinalIgnoreCase);
 
         var now = DateTime.UtcNow;
         var recipeNutritionByName = new Dictionary<string, RecipeNutrition>(StringComparer.OrdinalIgnoreCase);

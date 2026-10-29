@@ -51,6 +51,9 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
 
     public async Task<DeliveryRouteDto> CreateAsync(CreateRouteDto dto, CancellationToken ct = default)
     {
+        var taken = await FacilitiesOnOtherRoutesAsync(dto.Date, null, ct);
+        await EnsureFacilitiesFreeAsync(dto.FacilityIds, taken, ct);
+
         var route = new DeliveryRoute
         {
             Id = Guid.NewGuid(), TenantId = tenantContext.TenantId!.Value, Name = dto.Name, Date = dto.Date, DriverId = dto.DriverId,
@@ -77,6 +80,8 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
         var route = await db.Routes.Include(r => r.Stops).FirstOrDefaultAsync(r => r.Id == routeId, ct) ?? throw new NotFoundException(nameof(DeliveryRoute), routeId);
         if (route.Status == RouteStatus.ABGESCHLOSSEN) throw new ConflictException("Eine abgeschlossene Route kann nicht mehr geändert werden.");
         if (route.Stops.Any(s => s.FacilityId == dto.FacilityId)) throw new ConflictException("Diese Einrichtung ist bereits Teil der Route.");
+        var taken = await FacilitiesOnOtherRoutesAsync(route.Date, route.Id, ct);
+        await EnsureFacilitiesFreeAsync([dto.FacilityId], taken, ct);
 
         var facility = await db.Facilities.FirstOrDefaultAsync(f => f.Id == dto.FacilityId, ct) ?? throw new NotFoundException(nameof(Facility), dto.FacilityId);
         var sequenceNumber = (route.Stops.Count == 0 ? 0 : route.Stops.Max(s => s.SequenceNumber)) + 1;
@@ -117,43 +122,113 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
     /// übersprungen, damit ein versehentliches Doppelklicken keine Duplikate anlegt.</summary>
     public async Task<DuplicateWeekResultDto> DuplicateWeekAsync(DuplicateWeekDto dto, CancellationToken ct = default)
     {
+        if (dto.SourceWeekStart == dto.TargetWeekStart) throw new ValidationException("Quell- und Zielwoche müssen verschieden sein.");
         var sourceEnd = dto.SourceWeekStart.AddDays(6);
         var sourceRoutes = await db.Routes.Include(r => r.Stops)
             .Where(r => r.Date >= dto.SourceWeekStart && r.Date <= sourceEnd)
-            .OrderBy(r => r.Date)
+            .OrderBy(r => r.Date).ThenBy(r => r.PlannedDepartureTime)
             .ToListAsync(ct);
 
         var result = new DuplicateWeekResultDto();
+        var takenByDate = new Dictionary<DateOnly, Dictionary<Guid, string>>();
         foreach (var source in sourceRoutes)
         {
             var offsetDays = source.Date.DayNumber - dto.SourceWeekStart.DayNumber;
-            var targetDate = dto.TargetWeekStart.AddDays(offsetDays);
-
-            if (await db.Routes.AnyAsync(r => r.Date == targetDate && r.Name == source.Name, ct))
-            {
-                result.SkippedExisting.Add($"{source.Name} ({targetDate:dd.MM.yyyy})");
-                continue;
-            }
-
-            var facilityIds = source.Stops.OrderBy(s => s.SequenceNumber).Select(s => s.FacilityId).ToArray();
-            var createDto = new CreateRouteDto
-            {
-                Name = source.Name, Date = targetDate, DriverId = source.DriverId, LocationId = source.LocationId,
-                PlannedDepartureTime = source.PlannedDepartureTime, FacilityIds = facilityIds,
-            };
-            var newRoute = new DeliveryRoute
-            {
-                Id = Guid.NewGuid(), TenantId = tenantContext.TenantId!.Value, Name = createDto.Name, Date = createDto.Date,
-                DriverId = createDto.DriverId, LocationId = createDto.LocationId, PlannedDepartureTime = createDto.PlannedDepartureTime,
-                Status = RouteStatus.GEPLANT,
-            };
-            db.Routes.Add(newRoute);
-            await BuildStopsAsync(newRoute.Id, createDto, ct);
-            result.CreatedCount++;
+            await CopyRouteToDateAsync(source, dto.TargetWeekStart.AddDays(offsetDays), takenByDate, result, ct);
         }
 
         await db.SaveChangesAsync(ct);
         return result;
+    }
+
+    /// <summary>Wochenplanung: eine Tour (Name/Fahrer/Standort/Abfahrt/Reihenfolge der Kunden) auf
+    /// weitere Tage kopieren — typischer Fall: Tour 1 einmal für Montag anlegen, dann auf Di–Fr
+    /// übertragen. Gleiche Regeln wie DuplicateWeekAsync (vorhandene gleichnamige Tour am Zieltag
+    /// wird übersprungen, Kunden, die dort schon auf einer anderen Tour sind, werden ausgelassen).</summary>
+    public async Task<DuplicateWeekResultDto> CopyToDatesAsync(Guid routeId, CopyRouteDto dto, CancellationToken ct = default)
+    {
+        var source = await db.Routes.Include(r => r.Stops).FirstOrDefaultAsync(r => r.Id == routeId, ct) ?? throw new NotFoundException(nameof(DeliveryRoute), routeId);
+        var targetDates = dto.Dates.Distinct().Where(d => d != source.Date).OrderBy(d => d).ToList();
+        if (targetDates.Count == 0) throw new ValidationException("Bitte mindestens einen anderen Tag auswählen.");
+
+        var result = new DuplicateWeekResultDto();
+        var takenByDate = new Dictionary<DateOnly, Dictionary<Guid, string>>();
+        foreach (var date in targetDates)
+            await CopyRouteToDateAsync(source, date, takenByDate, result, ct);
+
+        await db.SaveChangesAsync(ct);
+        return result;
+    }
+
+    /// <summary>Shared by DuplicateWeekAsync/CopyToDatesAsync. Stops are rebuilt fresh from current
+    /// facility data and the target day's orders (not copied), so closures/orders of the target day
+    /// apply. <paramref name="takenByDate"/> carries facility→tour assignments across the whole batch,
+    /// since routes added earlier in the same call aren't saved yet and wouldn't show up in a query.
+    /// Does not save.</summary>
+    private async Task CopyRouteToDateAsync(DeliveryRoute source, DateOnly targetDate, Dictionary<DateOnly, Dictionary<Guid, string>> takenByDate, DuplicateWeekResultDto result, CancellationToken ct)
+    {
+        if (await db.Routes.AnyAsync(r => r.Date == targetDate && r.Name == source.Name, ct))
+        {
+            result.SkippedExisting.Add($"{source.Name} ({targetDate:dd.MM.yyyy})");
+            return;
+        }
+
+        if (!takenByDate.TryGetValue(targetDate, out var taken))
+            takenByDate[targetDate] = taken = await FacilitiesOnOtherRoutesAsync(targetDate, null, ct);
+
+        var facilityIds = new List<Guid>();
+        foreach (var facilityId in source.Stops.OrderBy(s => s.SequenceNumber).Select(s => s.FacilityId))
+        {
+            if (taken.TryGetValue(facilityId, out var otherRoute))
+            {
+                var facilityName = await db.Facilities.Where(f => f.Id == facilityId).Select(f => f.Name).FirstOrDefaultAsync(ct);
+                result.SkippedFacilities.Add($"{facilityName} am {targetDate:dd.MM.} (bereits in „{otherRoute}“)");
+                continue;
+            }
+            facilityIds.Add(facilityId);
+            taken[facilityId] = source.Name;
+        }
+
+        var createDto = new CreateRouteDto
+        {
+            Name = source.Name, Date = targetDate, DriverId = source.DriverId, LocationId = source.LocationId,
+            PlannedDepartureTime = source.PlannedDepartureTime, FacilityIds = facilityIds.ToArray(),
+        };
+        var newRoute = new DeliveryRoute
+        {
+            Id = Guid.NewGuid(), TenantId = tenantContext.TenantId!.Value, Name = createDto.Name, Date = createDto.Date,
+            DriverId = createDto.DriverId, LocationId = createDto.LocationId, PlannedDepartureTime = createDto.PlannedDepartureTime,
+            Status = RouteStatus.GEPLANT,
+        };
+        db.Routes.Add(newRoute);
+        await BuildStopsAsync(newRoute.Id, createDto, ct);
+        result.CreatedCount++;
+    }
+
+    /// <summary>Facility → name of the tour that already delivers it on <paramref name="date"/>. Goes
+    /// through db.Routes (tenant-filtered) on purpose — RouteStop itself has no tenant query filter.</summary>
+    private async Task<Dictionary<Guid, string>> FacilitiesOnOtherRoutesAsync(DateOnly date, Guid? exceptRouteId, CancellationToken ct)
+    {
+        var rows = await db.Routes
+            .Where(r => r.Date == date && r.Id != exceptRouteId)
+            .SelectMany(r => r.Stops.Select(s => new { s.FacilityId, r.Name }))
+            .ToListAsync(ct);
+        return rows.GroupBy(x => x.FacilityId).ToDictionary(g => g.Key, g => g.First().Name);
+    }
+
+    /// <summary>Eine Kita wird pro Tag genau von einer Tour beliefert — doppelte Einträge in der
+    /// Anfrage oder eine Einrichtung, die an dem Tag schon auf einer anderen Tour steht, werden mit
+    /// einer Liste der Konflikte abgelehnt statt stillschweigend doppelt angefahren.</summary>
+    private async Task EnsureFacilitiesFreeAsync(IReadOnlyCollection<Guid> facilityIds, Dictionary<Guid, string> taken, CancellationToken ct)
+    {
+        if (facilityIds.Distinct().Count() != facilityIds.Count)
+            throw new ValidationException("Eine Einrichtung kann nur einmal pro Tour vorkommen.");
+
+        var conflicts = facilityIds.Where(taken.ContainsKey).ToList();
+        if (conflicts.Count == 0) return;
+        var names = await db.Facilities.Where(f => conflicts.Contains(f.Id)).ToDictionaryAsync(f => f.Id, f => f.Name, ct);
+        var details = conflicts.Select(id => $"{names.GetValueOrDefault(id, "?")} (bereits in „{taken[id]}“)");
+        throw new ConflictException($"Jede Einrichtung kann pro Tag nur in einer Tour sein: {string.Join(", ", details)}.");
     }
 
     /// <summary>Hard delete — allowed regardless of status (GEPLANT through ABGESCHLOSSEN); an admin
@@ -175,6 +250,8 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
     {
         var route = await db.Routes.Include(r => r.Stops).FirstOrDefaultAsync(r => r.Id == id, ct) ?? throw new NotFoundException(nameof(DeliveryRoute), id);
         if (route.Status != RouteStatus.GEPLANT) throw new ConflictException("Nur eine noch nicht gestartete Route kann bearbeitet werden.");
+        var taken = await FacilitiesOnOtherRoutesAsync(dto.Date, route.Id, ct);
+        await EnsureFacilitiesFreeAsync(dto.FacilityIds, taken, ct);
 
         route.Name = dto.Name;
         route.Date = dto.Date;
@@ -332,6 +409,8 @@ public class DeliveryRouteHandler(DailyGourmetDbContext db, ITenantContext tenan
         if (targetRoute.Date != route.Date) throw new ValidationException("Zielroute muss für denselben Tag sein.");
         if (targetRoute.DriverId is null) throw new ValidationException("Zielroute hat noch keinen Fahrer — der Zielfahrer muss die Route zuerst übernehmen.");
         if (targetRoute.Status == RouteStatus.ABGESCHLOSSEN) throw new ConflictException("Zielroute ist bereits abgeschlossen.");
+        if (await db.RouteStops.AnyAsync(s => s.RouteId == targetRoute.Id && s.FacilityId == stop.FacilityId, ct))
+            throw new ConflictException("Diese Einrichtung ist bereits Teil der Zielroute.");
 
         var maxSequence = await db.RouteStops.Where(s => s.RouteId == targetRoute.Id).Select(s => (int?)s.SequenceNumber).MaxAsync(ct) ?? 0;
         stop.RouteId = targetRoute.Id;

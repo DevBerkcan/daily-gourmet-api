@@ -12,6 +12,7 @@ namespace DailyGourmet.Api.Controllers;
 public class OrdersController(OrderHandler handler) : ControllerBase
 {
     [HttpGet]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,READ_ONLY,FACILITY_ADMIN,FACILITY_USER")]
     public async Task<ActionResult<ApiResponse<PagedResult<OrderDto>>>> List(
         [FromQuery] Guid? facilityId, [FromQuery] Guid? mealPlanId, [FromQuery] int? calendarWeek, [FromQuery] string? status,
         [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default)
@@ -21,6 +22,7 @@ public class OrdersController(OrderHandler handler) : ControllerBase
     }
 
     [HttpGet("{id:guid}")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,READ_ONLY,FACILITY_ADMIN,FACILITY_USER")]
     public async Task<ActionResult<ApiResponse<OrderDto>>> GetById(Guid id, CancellationToken ct) =>
         Ok(ApiResponse<OrderDto>.Ok(await handler.GetByIdAsync(id, ct)));
 
@@ -66,6 +68,7 @@ public class OrdersController(OrderHandler handler) : ControllerBase
         Ok(ApiResponse<OrderDto>.Ok(await handler.OverrideAsync(id, dto, ct)));
 
     [HttpGet("{id:guid}/history")]
+    [Authorize(Roles = "TENANT_OWNER,TENANT_ADMIN,READ_ONLY,FACILITY_ADMIN,FACILITY_USER")]
     public async Task<ActionResult<ApiResponse<List<AuditLogEntryDto>>>> History(Guid id, CancellationToken ct) =>
         Ok(ApiResponse<List<AuditLogEntryDto>>.Ok(await handler.HistoryAsync(id, ct)));
 }

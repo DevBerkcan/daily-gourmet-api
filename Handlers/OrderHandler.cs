@@ -180,6 +180,9 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
 
     public async Task<List<AuditLogEntryDto>> HistoryAsync(Guid id, CancellationToken ct = default)
     {
+        var order = await db.Orders.FirstOrDefaultAsync(o => o.Id == id, ct) ?? throw new NotFoundException(nameof(Order), id);
+        EnsureFacilityAccess(order.FacilityId);
+
         var logs = await db.AuditLogs.Include(a => a.User)
             .Where(a => a.TenantId == tenantContext.TenantId && a.Entity == "Order" && a.EntityId == id.ToString())
             .OrderByDescending(a => a.CreatedAtUtc).ToListAsync(ct);

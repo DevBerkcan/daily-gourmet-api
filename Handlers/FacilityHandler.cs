@@ -64,11 +64,7 @@ public class FacilityHandler(
 
         var settings = await tenantSettings.GetAsync(tenantId, ct);
         var prefix = settings?.FacilityNumberPrefix ?? "DG-1";
-        // Explicit TenantId filter (not just facilities.Query(), which is only implicitly
-        // tenant-scoped for a normal caller) — a super-admin call bypasses the EF query filter
-        // entirely, so without this it would count facilities across every tenant.
-        var nextSequence = await facilities.Query().IgnoreQueryFilters().CountAsync(f => f.TenantId == tenantId, ct) + 1;
-        var customerNumber = $"{prefix}{nextSequence:000}";
+        var customerNumber = await NextCustomerNumberAsync(tenantId, prefix, ct);
 
         var facility = new Facility
         {
@@ -91,21 +87,33 @@ public class FacilityHandler(
             Notes = dto.Notes,
             RouteNumber = dto.RouteNumber,
         };
+
+        // Facility + its invited admin in one transaction: previously the facility was committed
+        // first, so a failing user insert surfaced as an error while the facility already existed —
+        // and the user's "retry" then created a duplicate.
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await facilities.AddAsync(facility, ct);
         await facilities.SaveChangesAsync(ct);
 
-        facility.Location = (await locations.GetByIdAsync(dto.LocationId, ct))!;
-        var result = ToDto(facility);
-
+        User? invitedAdmin = null;
         // The facility's Email doubles as the login for its FACILITY_ADMIN — auto-invite one now,
         // the same way UserManagementHandler.InviteAsync invites any other user. Gated by the
         // facility-auto-invite flag so a tenant can opt out without a code change.
         if (autoInviteEnabled)
         {
             var username = await UserInvitationHelper.GenerateUniqueUsernameAsync(db, email, ct);
-            var invitedAdmin = UserInvitationHelper.BuildInvitedUser(tenantId, facility.Id, dto.ContactPerson.Trim(), username, email, Role.FACILITY_ADMIN);
+            invitedAdmin = UserInvitationHelper.BuildInvitedUser(tenantId, facility.Id, dto.ContactPerson.Trim(), username, email, Role.FACILITY_ADMIN);
             db.Users.Add(invitedAdmin);
             await db.SaveChangesAsync(ct);
+        }
+        await transaction.CommitAsync(ct);
+
+        facility.Location = (await locations.GetByIdAsync(dto.LocationId, ct))!;
+        var result = ToDto(facility);
+
+        if (invitedAdmin is not null)
+        {
+            var username = invitedAdmin.Username;
             await SendFacilityInviteEmailAsync(invitedAdmin);
             result.AdminInvited = true;
             result.AdminUsername = username;
@@ -113,6 +121,29 @@ public class FacilityHandler(
         }
 
         return result;
+    }
+
+    /// <summary>Next free "{prefix}{seq:000}" for this tenant. Deliberately max-suffix + 1 rather than
+    /// count + 1: facilities are hard-deleted (see DeleteAsync), so after a delete count + 1 lands on a
+    /// number that's still taken and the (TenantId, CustomerNumber) unique index throws a 500.
+    /// Explicit TenantId filter + IgnoreQueryFilters so a super-admin caller doesn't see other tenants'.</summary>
+    private async Task<string> NextCustomerNumberAsync(Guid tenantId, string prefix, CancellationToken ct)
+    {
+        var existing = await facilities.Query().IgnoreQueryFilters()
+            .Where(f => f.TenantId == tenantId)
+            .Select(f => f.CustomerNumber)
+            .ToListAsync(ct);
+        var taken = existing.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var maxSequence = existing
+            .Where(n => n.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Select(n => int.TryParse(n[prefix.Length..], out var seq) ? seq : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        var next = maxSequence + 1;
+        while (taken.Contains($"{prefix}{next:000}")) next++;
+        return $"{prefix}{next:000}";
     }
 
     private async Task SendFacilityInviteEmailAsync(User user)

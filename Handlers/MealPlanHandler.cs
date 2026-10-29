@@ -201,6 +201,10 @@ public class MealPlanHandler(DailyGourmetDbContext db, ITenantContext tenantCont
         var plan = await db.MealPlans.FirstOrDefaultAsync(m => m.Id == id, ct) ?? throw new NotFoundException(nameof(MealPlan), id);
         if (plan.Status is not (MealPlanStatus.DRAFT or MealPlanStatus.REVIEW))
             throw new ConflictException("Nur Entwürfe oder Pläne in Prüfung können gelöscht werden.");
+        // A plan unpublished back to REVIEW can still carry orders (Order.MealPlanId is Restrict) —
+        // without this check the delete hit the FK and surfaced as a generic 500.
+        if (await db.Orders.AnyAsync(o => o.MealPlanId == id, ct))
+            throw new ConflictException("Für diesen Wochenplan gibt es bereits Bestellungen — er kann nicht gelöscht werden.");
 
         var wasInReview = plan.Status == MealPlanStatus.REVIEW;
         var tenantId = plan.TenantId;

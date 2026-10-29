@@ -48,7 +48,10 @@ public static class UserInvitationHelper
         var sb = new StringBuilder();
         foreach (var c in localPart.ToLowerInvariant())
             if (char.IsLetterOrDigit(c) || c is '.' or '_' or '-') sb.Append(c);
+        // Users.Username is nvarchar(64) — leave room for the collision suffix so a long email local
+        // part can't overflow the column (SQL truncation error → 500).
         var normalized = sb.Length > 0 ? sb.ToString() : "user";
+        if (normalized.Length > 56) normalized = normalized[..56];
 
         var username = normalized;
         var suffix = 1;
