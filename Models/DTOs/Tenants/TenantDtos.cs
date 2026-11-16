@@ -66,6 +66,12 @@ public class TenantSettingsDto
     public string FacilityNumberPrefix { get; set; } = string.Empty;
     public string ArticleNumberPrefix { get; set; } = string.Empty;
     public string RouteNumberPrefix { get; set; } = string.Empty;
+    /// <summary>Kitchen team addresses (comma/semicolon separated) for same-day reduction emails.</summary>
+    [System.ComponentModel.DataAnnotations.MaxLength(1000)]
+    public string? KitchenNotificationEmails { get; set; }
+    /// <summary>Hours before the order deadline at which the reminder email is sent.</summary>
+    [System.ComponentModel.DataAnnotations.Range(1, 168)]
+    public int OrderReminderHoursBefore { get; set; } = 24;
     public List<TenantNotificationSettingDto> NotificationSettings { get; set; } = [];
 }
 

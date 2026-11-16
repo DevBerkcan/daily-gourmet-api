@@ -22,6 +22,8 @@ public class FacilityDto
     public string Status { get; set; } = string.Empty;
     public string? Notes { get; set; }
     public string? RouteNumber { get; set; }
+    /// <summary>Facility may reduce portions on the delivery day until the Tagesanpassung cutoff.</summary>
+    public bool SameDayAdjustmentEnabled { get; set; }
     /// <summary>True only on the response to a Create call that actually sent a FACILITY_ADMIN
     /// invite for this facility's Email — lets the frontend show a richer confirmation message.</summary>
     public bool AdminInvited { get; set; }
@@ -72,6 +74,9 @@ public class CreateFacilityDto
 
     [MaxLength(20)]
     public string? RouteNumber { get; set; }
+
+    /// <summary>Contractual agreement: facility may reduce portions on the delivery day.</summary>
+    public bool SameDayAdjustmentEnabled { get; set; }
 }
 
 public class UpdateFacilityDto : CreateFacilityDto

@@ -86,6 +86,7 @@ public class FacilityHandler(
             Status = FacilityStatus.AKTIV,
             Notes = dto.Notes,
             RouteNumber = dto.RouteNumber,
+            SameDayAdjustmentEnabled = dto.SameDayAdjustmentEnabled,
         };
 
         // Facility + its invited admin in one transaction: previously the facility was committed
@@ -182,6 +183,7 @@ public class FacilityHandler(
         facility.Status = status;
         facility.Notes = dto.Notes;
         facility.RouteNumber = dto.RouteNumber;
+        facility.SameDayAdjustmentEnabled = dto.SameDayAdjustmentEnabled;
 
         facilities.Update(facility);
         await facilities.SaveChangesAsync(ct);
@@ -275,5 +277,6 @@ public class FacilityHandler(
         Status = f.Status.ToString(),
         Notes = f.Notes,
         RouteNumber = f.RouteNumber,
+        SameDayAdjustmentEnabled = f.SameDayAdjustmentEnabled,
     };
 }

@@ -55,6 +55,7 @@ public class DailyGourmetDbContext : DbContext
     public DbSet<MealPlanItem> MealPlanItems => Set<MealPlanItem>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderItem> OrderItems => Set<OrderItem>();
+    public DbSet<OrderReminder> OrderReminders => Set<OrderReminder>();
 
     // Production & kitchen
     public DbSet<ProductionPlan> ProductionPlans => Set<ProductionPlan>();

@@ -8,7 +8,11 @@ public class OrderItemDto
     public DateOnly Date { get; set; }
     public Guid RecipeId { get; set; }
     public string RecipeName { get; set; } = string.Empty;
+    /// <summary>Billable quantity (after any same-day reduction).</summary>
     public int Portions { get; set; }
+    /// <summary>Originally ordered quantity — only set once the item was reduced on the delivery day.</summary>
+    public int? OriginalPortions { get; set; }
+    public DateTime? SameDayAdjustedAtUtc { get; set; }
     public string? Note { get; set; }
 }
 
@@ -23,6 +27,10 @@ public class OrderDto
     public string Status { get; set; } = string.Empty;
     public DateTime? SubmittedAt { get; set; }
     public DateTime DeadlineAtUtc { get; set; }
+    /// <summary>Whether the facility has a same-day reduction agreement (Facility.SameDayAdjustmentEnabled).</summary>
+    public bool SameDayAdjustmentEnabled { get; set; }
+    /// <summary>Local cutoff time on the delivery day (facility override or tenant default).</summary>
+    public TimeSpan SameDayAdjustmentDeadlineTime { get; set; }
     public List<OrderItemDto> Items { get; set; } = [];
 }
 

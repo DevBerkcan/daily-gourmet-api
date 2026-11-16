@@ -14,11 +14,6 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
 {
     private static readonly OrderStatus[] BindingStatuses = [OrderStatus.SUBMITTED, OrderStatus.CONFIRMED, OrderStatus.LOCKED];
 
-    private static readonly Dictionary<string, string> WeekdayAbbreviation = new()
-    {
-        ["Montag"] = "Mo", ["Dienstag"] = "Di", ["Mittwoch"] = "Mi", ["Donnerstag"] = "Do", ["Freitag"] = "Fr",
-    };
-
     private static IQueryable<Order> FullQuery(DailyGourmetDbContext db) => db.Orders
         .Include(o => o.Facility)
         .Include(o => o.MealPlan)
@@ -35,15 +30,20 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
 
         var total = await query.CountAsync(ct);
         var items = await query.OrderByDescending(o => o.CreatedAt).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
-        return new PagedResult<OrderDto> { Items = items.Select(ToDto).ToList(), Total = total, Page = page, PageSize = pageSize };
+        var defaultCutoff = await DefaultSameDayCutoffAsync(ct);
+        return new PagedResult<OrderDto> { Items = items.Select(o => ToDto(o, defaultCutoff)).ToList(), Total = total, Page = page, PageSize = pageSize };
     }
 
     public async Task<OrderDto> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
         var order = await FullQuery(db).FirstOrDefaultAsync(o => o.Id == id, ct) ?? throw new NotFoundException(nameof(Order), id);
         EnsureFacilityAccess(order.FacilityId);
-        return ToDto(order);
+        return ToDto(order, await DefaultSameDayCutoffAsync(ct));
     }
+
+    private async Task<TimeSpan> DefaultSameDayCutoffAsync(CancellationToken ct) =>
+        await db.TenantSettings.Where(s => s.TenantId == tenantContext.TenantId).Select(s => (TimeSpan?)s.SameDayAdjustmentDeadlineTime).FirstOrDefaultAsync(ct)
+        ?? new TimeSpan(9, 0, 0);
 
     public async Task<OrderDto> SaveAsync(SaveOrderDto dto, CancellationToken ct = default)
     {
@@ -246,20 +246,17 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
     {
         var facility = await db.Facilities.FirstOrDefaultAsync(f => f.Id == facilityId, ct) ?? throw new NotFoundException(nameof(Facility), facilityId);
         var settings = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == facility.TenantId, ct);
-
-        var offsetDays = facility.OrderDeadlineOffsetDays ?? settings?.DefaultOrderDeadlineOffsetDays ?? 1;
-        var deadlineTime = facility.OrderDeadlineTime ?? settings?.DefaultOrderDeadlineTime ?? new TimeSpan(9, 0, 0);
-        var excludeWeekends = settings?.ExcludeWeekendsFromDeadline ?? true;
-
+        var closures = await db.FacilityClosures.Where(c => c.FacilityId == facilityId).ToListAsync(ct);
         var tz = await TenantClock.ForTenantAsync(db, facility.TenantId, ct);
-        var earliestDate = items.Count > 0 ? items.Min(i => i.Date) : TenantClock.Today(tz);
-        var deadlineDate = earliestDate.AddDays(-offsetDays);
-        if (excludeWeekends)
-            while (deadlineDate.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
-                deadlineDate = deadlineDate.AddDays(-1);
 
-        // deadlineTime is local wall-clock time of the tenant, not UTC (see TenantClock).
-        return TenantClock.LocalToUtc(deadlineDate, deadlineTime, tz);
+        // The deadline hangs off the first day the facility is actually supplied — a closed Monday
+        // (Schließtag) shouldn't pull the deadline a day earlier. Same rule as OrderReminderService.
+        var activeWeekdays = OrderDeadline.ActiveWeekdays(facility);
+        var deliveryDates = items.Select(i => i.Date).Where(d => OrderDeadline.IsDeliveryDay(d, activeWeekdays, closures)).ToList();
+        var earliestDate = deliveryDates.Count > 0 ? deliveryDates.Min()
+            : items.Count > 0 ? items.Min(i => i.Date)
+            : TenantClock.Today(tz);
+        return OrderDeadline.Compute(facility, settings, tz, earliestDate);
     }
 
     /// <summary>Blocks submit unless every (date, recipe) slot the published plan offers on this
@@ -272,13 +269,11 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
         var mealPlan = await db.MealPlans.Include(m => m.Days).ThenInclude(d => d.Items).ThenInclude(i => i.Recipe)
             .FirstOrDefaultAsync(m => m.Id == mealPlanId, ct) ?? throw new NotFoundException(nameof(MealPlan), mealPlanId);
         var facility = await db.Facilities.FirstOrDefaultAsync(f => f.Id == facilityId, ct) ?? throw new NotFoundException(nameof(Facility), facilityId);
-        var activeAbbreviations = facility.ActiveWeekdays.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+        var activeWeekdays = OrderDeadline.ActiveWeekdays(facility);
         var closures = await db.FacilityClosures.Where(c => c.FacilityId == facilityId).ToListAsync(ct);
-        bool IsClosed(DateOnly date) => closures.Any(c => c.StartDate <= date && date <= c.EndDate);
 
         var expected = mealPlan.Days
-            .Where(d => activeAbbreviations.Contains(WeekdayAbbreviation.GetValueOrDefault(d.Weekday, d.Weekday)))
-            .Where(d => !IsClosed(d.Date))
+            .Where(d => OrderDeadline.IsDeliveryDay(d.Date, activeWeekdays, closures))
             .SelectMany(d => d.Items.Select(i => new { d.Date, i.RecipeId, RecipeName = i.Recipe?.Name ?? "Gericht" }))
             .ToList();
         var provided = items.Select(i => (i.Date, i.RecipeId)).ToHashSet();
@@ -288,48 +283,134 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
             throw new ValidationException($"Für {missing.Date:dd.MM.yyyy} fehlt eine Angabe zu „{missing.RecipeName}“ — bitte 0 eintragen, falls nicht benötigt.");
     }
 
+    /// <summary>Tagesanpassung: facilities with a contractual agreement (Facility.SameDayAdjustmentEnabled)
+    /// may reduce — never increase — today's portions until the cutoff (default 09:00 local). The
+    /// first reduction freezes the originally ordered quantity in OrderItem.OriginalPortions, so
+    /// purchasing (original) vs. billing (Portions) stays traceable, and the kitchen is emailed
+    /// since they don't work in the system. Tenant staff may record a reduction on the facility's
+    /// behalf (e.g. a phone call) regardless of the agreement flag or cutoff.</summary>
     public async Task<OrderDto> AdjustSameDayAsync(Guid id, AdjustOrderDto dto, CancellationToken ct = default)
     {
-        var order = await db.Orders.Include(o => o.Facility).Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == id, ct)
+        var order = await db.Orders.Include(o => o.Facility).Include(o => o.Items).ThenInclude(i => i.Recipe)
+            .FirstOrDefaultAsync(o => o.Id == id, ct)
             ?? throw new NotFoundException(nameof(Order), id);
         EnsureFacilityAccess(order.FacilityId);
         if (order.Status is not (OrderStatus.SUBMITTED or OrderStatus.CONFIRMED))
             throw new ConflictException("Nur abgesendete oder bestätigte Bestellungen können am Liefertag angepasst werden.");
 
+        var isFacilityCaller = tenantContext.FacilityId is not null;
+        if (isFacilityCaller && !order.Facility.SameDayAdjustmentEnabled)
+            throw new ForbiddenException("Für Ihre Einrichtung ist keine Anpassung am Liefertag vereinbart. Bitte wenden Sie sich an Daily Gourmet.");
+
         var settings = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == order.TenantId, ct);
         var cutoffTime = order.Facility.SameDayAdjustmentDeadlineTime ?? settings?.SameDayAdjustmentDeadlineTime ?? new TimeSpan(9, 0, 0);
         var tz = await TenantClock.ForTenantAsync(db, order.TenantId, ct);
+        var today = TenantClock.Today(tz);
+        var now = DateTime.UtcNow;
 
+        var changes = new List<(OrderItem Item, int Before, string Note)>();
         foreach (var change in dto.Items)
         {
             var item = order.Items.FirstOrDefault(i => i.Id == change.ItemId)
                 ?? throw new ValidationException("Am Liefertag können nur bestehende Positionen reduziert werden, keine neuen hinzugefügt werden.");
+            var recipeName = item.Recipe?.Name ?? "Gericht";
             if (change.Portions > item.Portions)
-                throw new ValidationException($"Portionen für '{item.RecipeId}' können am Liefertag nur reduziert, nicht erhöht werden.");
+                throw new ValidationException($"Portionen für „{recipeName}“ können am Liefertag nur reduziert, nicht erhöht werden.");
 
-            var cutoff = TenantClock.LocalToUtc(item.Date, cutoffTime, tz);
-            if (DateTime.UtcNow > cutoff)
-                throw new ConflictException($"Die Frist für Anpassungen am {item.Date:dd.MM.yyyy} ist abgelaufen.");
+            if (isFacilityCaller)
+            {
+                // Only the delivery day itself — earlier this only checked the cutoff time, so future
+                // days of the week could be reduced after the regular order deadline had passed.
+                if (item.Date != today)
+                    throw new ConflictException($"Am Liefertag können nur die Positionen von heute ({today:dd.MM.yyyy}) angepasst werden.");
+                if (now > TenantClock.LocalToUtc(item.Date, cutoffTime, tz))
+                    throw new ConflictException($"Die Frist für Anpassungen am {item.Date:dd.MM.yyyy} ({cutoffTime:hh\\:mm} Uhr) ist abgelaufen.");
+            }
 
             if (change.Portions == item.Portions) continue;
+            changes.Add((item, item.Portions, change.Note.Trim()));
+            item.OriginalPortions ??= item.Portions;
             item.Portions = change.Portions;
-            item.Note = string.IsNullOrWhiteSpace(item.Note) ? change.Note : $"{item.Note} · {change.Note}";
+            item.SameDayAdjustedAtUtc = now;
+            item.UpdatedAt = now;
+            item.Note = string.IsNullOrWhiteSpace(item.Note) ? change.Note.Trim() : $"{item.Note} · {change.Note.Trim()}";
         }
 
-        order.UpdatedAt = DateTime.UtcNow;
+        if (changes.Count == 0) return await GetByIdAsync(id, ct);
+
+        order.UpdatedAt = now;
         db.AuditLogs.Add(new AuditLog
         {
             Id = Guid.NewGuid(), TenantId = tenantContext.TenantId, UserId = tenantContext.UserId,
-            Action = "Portionen am Liefertag angepasst", Entity = "Order", EntityId = order.Id.ToString(),
-            Reason = string.Join("; ", dto.Items.Select(i => i.Note)), CreatedAtUtc = DateTime.UtcNow,
+            Action = "Portionen am Liefertag reduziert", Entity = "Order", EntityId = order.Id.ToString(),
+            Reason = string.Join("; ", changes.Select(c => $"{c.Item.Recipe?.Name ?? "Gericht"} {c.Item.Date:dd.MM.}: {c.Before} → {c.Item.Portions} ({c.Note})")),
+            CreatedAtUtc = now,
         });
         // Reduction must reach the driver's loading list, which is a snapshot from route creation.
         await RouteStopItemSync.SyncAsync(db, order, [], ct);
         await db.SaveChangesAsync(ct);
+
+        await NotifyKitchenOfReductionAsync(order, settings, changes, tz, ct);
         return await GetByIdAsync(id, ct);
     }
 
-    private static OrderDto ToDto(Order o) => new()
+    /// <summary>The kitchen team works exclusively by email and never sees the system, so every
+    /// same-day reduction is mailed to TenantSettings.KitchenNotificationEmails (fallback: active
+    /// tenant owners/admins). Can be switched off via the "OrderChangedAfterSubmit" notification
+    /// setting; a missing setting row counts as enabled.</summary>
+    private async Task NotifyKitchenOfReductionAsync(Order order, TenantSettings? settings, List<(OrderItem Item, int Before, string Note)> changes, TimeZoneInfo tz, CancellationToken ct)
+    {
+        var disabled = await db.TenantNotificationSettings
+            .AnyAsync(n => n.TenantId == order.TenantId && n.EventKey == "OrderChangedAfterSubmit" && !n.Enabled, ct);
+        if (disabled) return;
+
+        var recipients = OrderDeadline.ParseEmailList(settings?.KitchenNotificationEmails)
+            .Select(e => (Email: e, Name: "Küche")).ToList();
+        if (recipients.Count == 0)
+        {
+            var admins = await db.Users
+                .Where(u => u.TenantId == order.TenantId && (u.Role == Role.TENANT_OWNER || u.Role == Role.TENANT_ADMIN) && u.Status == UserStatus.AKTIV)
+                .Select(u => new { u.Email, u.Name }).ToListAsync(ct);
+            recipients = admins.Select(u => (Email: u.Email, Name: u.Name)).ToList();
+        }
+        if (recipients.Count == 0) return;
+
+        var facilityName = System.Net.WebUtility.HtmlEncode(order.Facility.Name);
+        var differenz = changes.Sum(c => c.Before - c.Item.Portions);
+        var zeitpunkt = TenantClock.UtcToLocal(DateTime.UtcNow, tz);
+        var rows = string.Join("", changes.Select(c => $"""
+            <tr>
+              <td style="padding:6px 8px;border-bottom:1px solid #e3e7ed;">{c.Item.Date:dd.MM.yyyy}</td>
+              <td style="padding:6px 8px;border-bottom:1px solid #e3e7ed;">{System.Net.WebUtility.HtmlEncode(c.Item.Recipe?.Name ?? "Gericht")}</td>
+              <td style="padding:6px 8px;border-bottom:1px solid #e3e7ed;text-align:right;">{c.Item.OriginalPortions ?? c.Before}</td>
+              <td style="padding:6px 8px;border-bottom:1px solid #e3e7ed;text-align:right;">{c.Before}</td>
+              <td style="padding:6px 8px;border-bottom:1px solid #e3e7ed;text-align:right;"><strong>{c.Item.Portions}</strong></td>
+              <td style="padding:6px 8px;border-bottom:1px solid #e3e7ed;text-align:right;color:#b42318;">−{c.Before - c.Item.Portions}</td>
+            </tr>
+            """));
+        var reasons = string.Join("", changes.Select(c => c.Note).Where(n => n.Length > 0).Distinct()
+            .Select(n => $"<li>{System.Net.WebUtility.HtmlEncode(n)}</li>"));
+        var body = $"""
+            <p><strong>{facilityName}</strong> hat die Bestellung am Liefertag um <strong>{differenz} Portion(en)</strong> reduziert ({zeitpunkt:dd.MM.yyyy HH:mm} Uhr).</p>
+            <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:13px;margin:12px 0;">
+              <tr style="background:#f6f7f9;">
+                <th align="left" style="padding:6px 8px;">Datum</th><th align="left" style="padding:6px 8px;">Gericht</th>
+                <th align="right" style="padding:6px 8px;">Ursprünglich</th><th align="right" style="padding:6px 8px;">Bisher</th>
+                <th align="right" style="padding:6px 8px;">Neu</th><th align="right" style="padding:6px 8px;">Differenz</th>
+              </tr>
+              {rows}
+            </table>
+            {(reasons.Length > 0 ? $"<p>Begründung:</p><ul>{reasons}</ul>" : "")}
+            """;
+        var text = $"{order.Facility.Name} hat die Bestellung am Liefertag um {differenz} Portion(en) reduziert ({zeitpunkt:dd.MM.yyyy HH:mm} Uhr).\n"
+            + string.Join("\n", changes.Select(c => $"{c.Item.Date:dd.MM.yyyy} {c.Item.Recipe?.Name}: {c.Before} → {c.Item.Portions} (ursprünglich {c.Item.OriginalPortions ?? c.Before}) — {c.Note}"));
+        var html = EmailTemplate.Render($"{order.Facility.Name}: −{differenz} Portion(en) heute", body);
+        var subject = $"Tagesanpassung: {order.Facility.Name} −{differenz} Portion(en) am {changes[0].Item.Date:dd.MM.}";
+        foreach (var (address, name) in recipients)
+            await email.SendAsync(address, name, subject, html, text);
+    }
+
+    private static OrderDto ToDto(Order o, TimeSpan defaultSameDayCutoff) => new()
     {
         Id = o.Id,
         FacilityId = o.FacilityId,
@@ -340,6 +421,12 @@ public class OrderHandler(DailyGourmetDbContext db, ITenantContext tenantContext
         Status = o.Status.ToString(),
         SubmittedAt = o.SubmittedAt,
         DeadlineAtUtc = o.DeadlineAtUtc,
-        Items = o.Items.Select(i => new OrderItemDto { Id = i.Id, Date = i.Date, RecipeId = i.RecipeId, RecipeName = i.Recipe?.Name ?? string.Empty, Portions = i.Portions, Note = i.Note }).ToList(),
+        SameDayAdjustmentEnabled = o.Facility?.SameDayAdjustmentEnabled ?? false,
+        SameDayAdjustmentDeadlineTime = o.Facility?.SameDayAdjustmentDeadlineTime ?? defaultSameDayCutoff,
+        Items = o.Items.Select(i => new OrderItemDto
+        {
+            Id = i.Id, Date = i.Date, RecipeId = i.RecipeId, RecipeName = i.Recipe?.Name ?? string.Empty, Portions = i.Portions, Note = i.Note,
+            OriginalPortions = i.OriginalPortions, SameDayAdjustedAtUtc = i.SameDayAdjustedAtUtc,
+        }).ToList(),
     };
 }

@@ -112,6 +112,25 @@ public class OrderItem : BaseEntity
     public DateOnly Date { get; set; }
     public Guid RecipeId { get; set; }
     public Recipe Recipe { get; set; } = null!;
+    /// <summary>Billable quantity — after a same-day reduction this is the reduced value.</summary>
     public int Portions { get; set; }
+    /// <summary>The quantity as originally ordered within the regular deadline — frozen on the first
+    /// same-day reduction (OrderHandler.AdjustSameDayAsync) and never touched again, so purchasing
+    /// (planned on the original) and billing (on Portions) can both be reconstructed. Null while the
+    /// item has never been reduced on the delivery day.</summary>
+    public int? OriginalPortions { get; set; }
+    public DateTime? SameDayAdjustedAtUtc { get; set; }
     public string? Note { get; set; }
+}
+
+/// <summary>Records that the "Bestellfrist läuft ab" reminder for a facility/week was sent, so the
+/// background job (OrderReminderService) sends each reminder at most once. Deliberately a plain log
+/// table without FKs — it must never block deleting a facility or meal plan.</summary>
+public class OrderReminder : BaseEntity
+{
+    public Guid TenantId { get; set; }
+    public Guid FacilityId { get; set; }
+    public Guid MealPlanId { get; set; }
+    public DateTime DeadlineAtUtc { get; set; }
+    public DateTime SentAtUtc { get; set; }
 }

@@ -44,6 +44,8 @@ public class TenantSettingsConfiguration : IEntityTypeConfiguration<TenantSettin
         b.HasKey(s => s.TenantId);
         b.Property(s => s.FacilityNumberPrefix).HasMaxLength(10).IsRequired();
         b.Property(s => s.ArticleNumberPrefix).HasMaxLength(10).IsRequired();
+        b.Property(s => s.KitchenNotificationEmails).HasMaxLength(1000);
+        b.Property(s => s.OrderReminderHoursBefore).HasDefaultValue(24);
     }
 }
 

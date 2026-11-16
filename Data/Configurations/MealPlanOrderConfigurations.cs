@@ -97,3 +97,11 @@ public class OrderItemConfiguration : IEntityTypeConfiguration<OrderItem>
             .HasForeignKey(i => i.RecipeId).OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+public class OrderReminderConfiguration : IEntityTypeConfiguration<OrderReminder>
+{
+    public void Configure(EntityTypeBuilder<OrderReminder> b)
+    {
+        b.HasIndex(r => new { r.FacilityId, r.MealPlanId }).IsUnique();
+    }
+}

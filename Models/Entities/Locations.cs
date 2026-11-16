@@ -37,6 +37,10 @@ public class Facility : BaseEntity, ITenantScoped
     public TimeSpan? OrderDeadlineTime { get; set; }
     /// <summary>Per-facility override of TenantSettings.SameDayAdjustmentDeadlineTime.</summary>
     public TimeSpan? SameDayAdjustmentDeadlineTime { get; set; }
+    /// <summary>Only facilities with a contractual agreement may reduce portions on the delivery day
+    /// itself (until the Tagesanpassung cutoff) — see OrderHandler.AdjustSameDayAsync. Off by
+    /// default; enabled per facility by the tenant's admins.</summary>
+    public bool SameDayAdjustmentEnabled { get; set; }
 
     /// <summary>CSV of active weekdays, e.g. "Mo,Di,Mi,Do,Fr".</summary>
     public string ActiveWeekdays { get; set; } = "Mo,Di,Mi,Do,Fr";

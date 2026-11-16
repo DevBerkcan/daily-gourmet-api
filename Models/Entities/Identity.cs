@@ -56,6 +56,15 @@ public class TenantSettings
     /// the delivery day itself before which a facility may still reduce (never increase) an
     /// already-submitted order's portions — see OrderHandler.AdjustSameDayAsync.</summary>
     public TimeSpan SameDayAdjustmentDeadlineTime { get; set; } = new(9, 0, 0);
+
+    /// <summary>Comma/semicolon separated addresses (e.g. the kitchen team) notified whenever a
+    /// facility reduces its order on the delivery day. Empty → tenant owners/admins instead.</summary>
+    public string? KitchenNotificationEmails { get; set; }
+
+    /// <summary>How many hours before the order deadline facilities without a submitted order get
+    /// the automatic reminder (OrderReminderService). Gated by the "DeadlineApproaching"
+    /// notification setting.</summary>
+    public int OrderReminderHoursBefore { get; set; } = 24;
 }
 
 /// <summary>Per-event notification toggle for a tenant.</summary>

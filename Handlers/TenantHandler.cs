@@ -86,6 +86,9 @@ public class TenantHandler(DailyGourmetDbContext db, ITenantSettingsRepository s
         settings.ArticleNumberPrefix = dto.ArticleNumberPrefix;
         settings.RouteNumberPrefix = dto.RouteNumberPrefix;
         settings.SameDayAdjustmentDeadlineTime = dto.SameDayAdjustmentDeadlineTime;
+        var kitchenEmails = OrderDeadline.ParseEmailList(dto.KitchenNotificationEmails);
+        settings.KitchenNotificationEmails = kitchenEmails.Count > 0 ? string.Join(", ", kitchenEmails) : null;
+        settings.OrderReminderHoursBefore = dto.OrderReminderHoursBefore;
 
         var existing = await db.TenantNotificationSettings.Where(n => n.TenantId == tenantId).ToListAsync(ct);
         foreach (var item in dto.NotificationSettings)
@@ -113,6 +116,8 @@ public class TenantHandler(DailyGourmetDbContext db, ITenantSettingsRepository s
         ExcludeWeekendsFromDeadline = s.ExcludeWeekendsFromDeadline, RequireReviewBeforePublish = s.RequireReviewBeforePublish,
         UnpublishRequiresNoOrders = s.UnpublishRequiresNoOrders, FacilityNumberPrefix = s.FacilityNumberPrefix, ArticleNumberPrefix = s.ArticleNumberPrefix,
         RouteNumberPrefix = s.RouteNumberPrefix,
+        KitchenNotificationEmails = s.KitchenNotificationEmails,
+        OrderReminderHoursBefore = s.OrderReminderHoursBefore,
         NotificationSettings = notifications.Select(n => new TenantNotificationSettingDto { EventKey = n.EventKey, Enabled = n.Enabled }).ToList(),
     };
 }

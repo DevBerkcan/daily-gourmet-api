@@ -363,6 +363,9 @@ namespace DailyGourmet.Api.Migrations
                     b.Property<TimeSpan?>("SameDayAdjustmentDeadlineTime")
                         .HasColumnType("time");
 
+                    b.Property<bool>("SameDayAdjustmentEnabled")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -968,11 +971,17 @@ namespace DailyGourmet.Api.Migrations
                     b.Property<Guid>("OrderId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("OriginalPortions")
+                        .HasColumnType("int");
+
                     b.Property<int>("Portions")
                         .HasColumnType("int");
 
                     b.Property<Guid>("RecipeId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("SameDayAdjustedAtUtc")
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -987,6 +996,41 @@ namespace DailyGourmet.Api.Migrations
                         {
                             t.HasCheckConstraint("CK_OrderItem_Portions", "[Portions] >= 0");
                         });
+                });
+
+            modelBuilder.Entity("DailyGourmet.Api.Models.Entities.OrderReminder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("DeadlineAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("FacilityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("MealPlanId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("SentAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FacilityId", "MealPlanId")
+                        .IsUnique();
+
+                    b.ToTable("OrderReminders");
                 });
 
             modelBuilder.Entity("DailyGourmet.Api.Models.Entities.ProcurementList", b =>
@@ -2165,6 +2209,15 @@ namespace DailyGourmet.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(10)
                         .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("KitchenNotificationEmails")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("OrderReminderHoursBefore")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(24);
 
                     b.Property<bool>("RequireReviewBeforePublish")
                         .HasColumnType("bit");

@@ -28,6 +28,7 @@ builder.Services.Configure<CorsOptions>(builder.Configuration.GetSection(CorsOpt
 builder.Services.Configure<AppOptions>(builder.Configuration.GetSection(AppOptions.SectionName));
 builder.Services.Configure<FileStorageOptions>(builder.Configuration.GetSection(FileStorageOptions.SectionName));
 builder.Services.Configure<ImgBbOptions>(builder.Configuration.GetSection(ImgBbOptions.SectionName));
+builder.Services.Configure<OrderReminderOptions>(builder.Configuration.GetSection(OrderReminderOptions.SectionName));
 
 // ---- Data ----
 builder.Services.AddScoped<ITenantContext, TenantContext>();
@@ -86,6 +87,8 @@ builder.Services.AddScoped<IPdfService, PdfService>();
 builder.Services.AddScoped<IFileStorageService, LocalFileStorageService>();
 builder.Services.AddScoped<IFeatureFlagService, FeatureFlagService>();
 builder.Services.AddHttpClient<IImageHostingService, ImgBbImageHostingService>();
+// Background job: "Bestellfrist läuft ab" reminders (off in Development — see OrderReminderOptions).
+builder.Services.AddHostedService<OrderReminderService>();
 
 // ---- Repositories ----
 // Open-generic registration covers every entity that doesn't need custom queries; entities that
