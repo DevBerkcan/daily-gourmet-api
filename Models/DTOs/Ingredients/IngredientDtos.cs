@@ -127,7 +127,10 @@ public class ImportResultDto
 public class SaveIngredientDto
 {
     [Required, MaxLength(200)] public string Name { get; set; } = string.Empty;
-    [Required, MaxLength(50)] public string ArticleNumber { get; set; } = string.Empty;
+    /// <summary>Optional — left empty on create, the handler assigns the next free number from the
+    /// tenant's ArticleNumberPrefix, so the (TenantId, ArticleNumber) unique index still holds.
+    /// Left empty on update, the existing number is kept.</summary>
+    [MaxLength(50)] public string? ArticleNumber { get; set; }
     [Required] public Guid CategoryId { get; set; }
     public Guid? SupplierId { get; set; }
     [Required] public Unit BaseUnit { get; set; }

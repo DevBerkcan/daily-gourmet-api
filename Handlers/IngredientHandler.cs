@@ -45,6 +45,7 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
 
     public async Task<IngredientDto> CreateAsync(SaveIngredientDto dto, CancellationToken ct = default)
     {
+        var articleNumber = await ResolveArticleNumberAsync(dto.ArticleNumber, ct);
         var ingredient = new Ingredient
         {
             Id = Guid.NewGuid(),
@@ -52,7 +53,7 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
             CategoryId = dto.CategoryId,
             SupplierId = dto.SupplierId,
             Name = dto.Name.Trim(),
-            ArticleNumber = dto.ArticleNumber.Trim(),
+            ArticleNumber = articleNumber,
             BaseUnit = dto.BaseUnit,
             PurchaseUnit = dto.PurchaseUnit,
             ConversionFactor = dto.ConversionFactor,
@@ -83,7 +84,8 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
         ingredient.CategoryId = dto.CategoryId;
         ingredient.SupplierId = dto.SupplierId;
         ingredient.Name = dto.Name.Trim();
-        ingredient.ArticleNumber = dto.ArticleNumber.Trim();
+        // Leer gelassen = bisherige Nummer behalten, keine Neuvergabe.
+        if (!string.IsNullOrWhiteSpace(dto.ArticleNumber)) ingredient.ArticleNumber = dto.ArticleNumber.Trim();
         ingredient.BaseUnit = dto.BaseUnit;
         ingredient.PurchaseUnit = dto.PurchaseUnit;
         ingredient.ConversionFactor = dto.ConversionFactor;
@@ -131,6 +133,29 @@ public class IngredientHandler(DailyGourmetDbContext db, ITenantContext tenantCo
 
         db.Ingredients.Remove(ingredient);
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>The given number when set; otherwise the next free "{prefix}{n:000}" from the
+    /// tenant's ArticleNumberPrefix (default "ART-") — the Artikelnummer is optional in the UI.</summary>
+    private async Task<string> ResolveArticleNumberAsync(string? requested, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(requested)) return requested.Trim();
+
+        var tenantId = tenantContext.TenantId!.Value;
+        var prefix = await db.TenantSettings.Where(s => s.TenantId == tenantId).Select(s => s.ArticleNumberPrefix).FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(prefix)) prefix = "ART-";
+
+        var existing = await db.Ingredients.IgnoreQueryFilters()
+            .Where(i => i.TenantId == tenantId && i.ArticleNumber.StartsWith(prefix))
+            .Select(i => i.ArticleNumber)
+            .ToListAsync(ct);
+        var taken = existing.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var next = existing
+            .Select(n => int.TryParse(n[prefix.Length..], out var seq) ? seq : 0)
+            .DefaultIfEmpty(0)
+            .Max() + 1;
+        while (taken.Contains($"{prefix}{next:000}")) next++;
+        return $"{prefix}{next:000}";
     }
 
     private async Task SaveOrConflictAsync(CancellationToken ct)

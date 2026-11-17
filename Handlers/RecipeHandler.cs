@@ -486,7 +486,10 @@ public class RecipeHandler(DailyGourmetDbContext db, ITenantContext tenantContex
                 IngredientId = ri.IngredientId,
                 IngredientName = ri.Ingredient.Name,
                 OriginalQuantity = ri.Quantity,
-                ScaledQuantity = decimal.Round(ri.Quantity * factor, 2, MidpointRounding.AwayFromZero),
+                // Stückzahlen (z. B. Eier) lassen sich nicht teilen — immer auf ganze Stück aufrunden.
+                ScaledQuantity = ri.Unit == Unit.Stueck
+                    ? decimal.Ceiling(ri.Quantity * factor)
+                    : decimal.Round(ri.Quantity * factor, 2, MidpointRounding.AwayFromZero),
                 Unit = ri.Unit.ToString(),
             }).ToList(),
         };
